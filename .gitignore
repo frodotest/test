@@ -12,3 +12,5 @@ secret_config.py
 *.pem
 broadcast.py
 filler.py
+test.py
+aiogram/

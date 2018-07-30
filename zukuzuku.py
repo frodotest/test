@@ -5,9 +5,11 @@ import logging
 import random
 import re
 import ssl
+import subprocess
 import threading
 import time
 from threading import Timer
+from multiprocessing import Process as Thread
 
 import telebot
 from telebot import types
@@ -74,10 +76,8 @@ app.router.add_post('/{token}/', handle)
 
 def create_user_language_keyboard():
     lang_keyboard = types.InlineKeyboardMarkup()
-    lang_keyboard.add(types.InlineKeyboardButton(text="Русский", callback_data='ru_lang'))
-    lang_keyboard.add(types.InlineKeyboardButton(text="English", callback_data='en_lang'))
-    lang_keyboard.add(types.InlineKeyboardButton(text="O'zbek", callback_data='uz_lang'))
-    lang_keyboard.add(types.InlineKeyboardButton(text='Українська', callback_data='ukr_lang'))
+    for i in config.languages:
+        lang_keyboard.add(types.InlineKeyboardButton(text = i['title'], callback_data = 'lang::{lang_code}'.format(lang_code = i['code'])))
     return lang_keyboard
 
 def group_setting(chat_id):
@@ -99,6 +99,9 @@ def group_setting(chat_id):
     keyboard.add(btn)
     btn = types.InlineKeyboardButton(text = 'Настройка приветствий', callback_data = 'welcome_settings::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn)
+    btn = types.InlineKeyboardButton(text = 'Получить дамп настроек', callback_data = 'get_settings_json::{chat_id}'.format(chat_id = chat_id))
+    keyboard.add(btn)
+    keyboard.add(types.InlineKeyboardButton(text = 'К списку групп', callback_data = 'to_groups_list'))
     return keyboard
 
 def welcome_settings_kb(chat_id):
@@ -115,7 +118,7 @@ def welcome_settings_kb(chat_id):
     kb.add(btn1, btn2, btn3, btn4)
     btn = types.InlineKeyboardButton(text = 'Показать приветствие', callback_data = 'welcome_get::{chat_id}'.format(chat_id = chat_id))
     kb.add(btn)
-    btn = types.InlineKeyboardButton(text = 'Назад', callback_data='to_main_menu::{chat_id}'.format(chat_id = chat_id))
+    btn = types.InlineKeyboardButton(text = 'Назад', callback_data='to_group_settings_menu::{chat_id}'.format(chat_id = chat_id))
     kb.add(btn)
     return kb
 
@@ -129,10 +132,13 @@ def new_users_restrictions_kb(chat_id):
     btn2 = types.InlineKeyboardButton(text = '➖1', callback_data = 'time_ro_-1::{chat_id}'.format(chat_id = chat_id))
     btn3 = types.InlineKeyboardButton(text = '➕1', callback_data = 'time_ro_+1::{chat_id}'.format(chat_id = chat_id))
     btn4 = types.InlineKeyboardButton(text = '➕2', callback_data = 'time_ro_+2::{chat_id}'.format(chat_id = chat_id))
+    btn5 = types.InlineKeyboardButton(text = 'Навсегда', callback_data = 'time_ro_+10000::{chat_id}'.format(chat_id = chat_id))
+    btn6 = types.InlineKeyboardButton(text = 'Сброс', callback_data = 'time_ro_-10000000000::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn1, btn2, btn3, btn4)
+    keyboard.add(btn5, btn6)
     btn = types.InlineKeyboardButton(text = 'Снятие ограничений разрешено для: {}'.format(config.new_users[curr_settings['restrictions']['admins_only']]), callback_data = 'new_restrictions_admins_only_{state}::{chat_id}'.format(state = config.settings_states[curr_settings['restrictions']['admins_only']], chat_id = chat_id))
     keyboard.add(btn)
-    btn = types.InlineKeyboardButton(text = 'Назад', callback_data='to_main_menu::{chat_id}'.format(chat_id = chat_id))
+    btn = types.InlineKeyboardButton(text = 'Назад', callback_data='to_group_settings_menu::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn)
     return keyboard
 
@@ -145,6 +151,7 @@ def warns_settings_kb(chat_id):
     btn2 = types.InlineKeyboardButton(text = '➖1', callback_data = 'warns_count_-1::{chat_id}'.format(chat_id = chat_id))
     btn3 = types.InlineKeyboardButton(text = '➕1', callback_data = 'warns_count_+1::{chat_id}'.format(chat_id = chat_id))
     btn4 = types.InlineKeyboardButton(text = '➕2', callback_data = 'warns_count_+2::{chat_id}'.format(chat_id = chat_id))
+    
     keyboard.add(btn1, btn2, btn3, btn4)
     btn = types.InlineKeyboardButton(text = 'Действие при максимальном кол-ве варнов: {}'.format(config.warns_states[curr_settings['warns']['action']]), callback_data='empty_callback::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn)
@@ -153,7 +160,7 @@ def warns_settings_kb(chat_id):
     btn3 = types.InlineKeyboardButton(text = 'Бан', callback_data = 'warns_action_2::{chat_id}'.format(chat_id = chat_id))
     btn4 = types.InlineKeyboardButton(text = 'Read-only на сутки', callback_data = 'warns_action_3::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn1, btn2, btn3, btn4)
-    btn = types.InlineKeyboardButton(text = 'Назад', callback_data='to_main_menu::{chat_id}'.format(chat_id = chat_id))
+    btn = types.InlineKeyboardButton(text = 'Назад', callback_data='to_group_settings_menu::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn)
     return keyboard
 
@@ -171,7 +178,7 @@ def unban_new_user_kb(msg):
 
 def user_settings_main_menu(msg):
     keyboard = types.InlineKeyboardMarkup(row_width=1)
-    curr_settings = api.get_user_params(msg.chat.id)
+    curr_settings = api.get_user_param(msg.chat.id, 'settings')
     btn = types.InlineKeyboardButton(text = 'Принимать рассылки{}'.format(config.settings_statuses['get_notifications']), callback_data='get_notifications')
     keyboard.add(btn)
     btn = types.InlineKeyboardButton(text = 'Выбор языка'.format(config.settings_statuses['get_notifications']), callback_data='open_lang_menu')
@@ -182,11 +189,11 @@ def delete_settings(chat_id):
     keyboard = types.InlineKeyboardMarkup(row_width=1)
     curr_settings = api.get_group_params(chat_id)
     for cont_type in config.available_attachments:
-        btn = types.InlineKeyboardButton(text=config.available_attachments_str[cont_type].format(config.settings_statuses[curr_settings['deletions']['files'][cont_type]]), callback_data='delete_{content_type}::{chat_id}'.format(content_type = cont_type, chat_id = chat_id))
+        btn = types.InlineKeyboardButton(text=config.available_attachments_str[cont_type].format(config.settings_statuses[curr_settings['deletions']['files'][cont_type]]), callback_data='delete::{content_type}::{chat_id}'.format(content_type = cont_type, chat_id = chat_id))
         keyboard.add(btn)
     btn = types.InlineKeyboardButton(text = 'Переключить все', callback_data = 'change_all::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn)
-    btn = types.InlineKeyboardButton(text = 'Назад', callback_data='to_main_menu::{chat_id}'.format(chat_id = chat_id))
+    btn = types.InlineKeyboardButton(text = 'Назад', callback_data='to_group_settings_menu::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn)
     return keyboard
 
@@ -199,12 +206,73 @@ def generate_leave_kb(msg):
     keyboard.add(btn)
     return keyboard
 
+def generate_user_menu_kb(user_id):
+    kb = types.InlineKeyboardMarkup(row_width = 1)
+    btn1 = types.InlineKeyboardButton(text = 'Мои чаты', callback_data = 'my_chats')
+    btn2 = types.InlineKeyboardButton(text = 'Изменить язык', callback_data = 'change_lang')
+    kb.add(btn1, btn2)
+    if utils.check_super_user(user_id):
+        kb.add(types.InlineKeyboardButton(text = 'Админка бота', callback_data = 'admin_menu'))
+    return kb
+    
+def generate_admin_menu_kb():
+    kb = types.InlineKeyboardMarkup(row_width = 2)
+    btn1 = types.InlineKeyboardButton(text = 'Рассылка', callback_data = 'broadcast_menu')
+    btn2 = types.InlineKeyboardButton(text = 'Статистика', callback_data = 'stats_menu')
+    kb.add(btn1, btn2)
+    kb.add(types.InlineKeyboardButton(text = 'В главное меню', callback_data = 'to_main_menu'))
+    return kb
+    
+def generate_broadcast_vars_menu_kb():
+    kb = types.InlineKeyboardMarkup(row_width = 1)
+    btn1 = types.InlineKeyboardButton(text = 'Рассылка-проверка', callback_data = 'check_broadcast')
+    btn2 = types.InlineKeyboardButton(text = 'Рассылка сообщения', callback_data = 'broadcast_settings')
+    kb.add(btn1, btn2)
+    kb.add(types.InlineKeyboardButton(text = 'В главное меню', callback_data = 'to_main_menu'))
+    return kb
+
+def generate_broadcast_settings_menu_kb():
+    kb = types.InlineKeyboardMarkup(row_width = 2)
+    btn1 = types.InlineKeyboardButton(text = 'Ввести сообщение', callback_data = 'broadcast_message::input')
+    btn2 = types.InlineKeyboardButton(text = 'Просмотреть сообщение', callback_data = 'broadcast_message::show')
+    btn3 = types.InlineKeyboardButton(text = 'Начать рассылку', callback_data = 'broadcast_message::start')
+    kb.add(btn1, btn2, btn3)
+    return kb
+    
+def generate_broadcast_check_menu_kb():
+    kb = types.InlineKeyboardMarkup(row_width = 3)
+    curr_settings = ujson.loads(api.get_bot_settings(secret_config.token))
+    s = {
+        'users': 'пользователи',
+        'chats': 'диалоги',
+        'all': 'все'
+    }
+    btn1 = types.InlineKeyboardButton(text = 'Только диалоги', callback_data = 'broadcast_check::users')
+    btn2 = types.InlineKeyboardButton(text = 'Только чаты', callback_data = 'broadcast_check::chats')
+    btn3 = types.InlineKeyboardButton(text = 'Все', callback_data = 'broadcast_check::all')
+    btn4 = types.InlineKeyboardButton(text = 'Сейчас: {}'.format(s[curr_settings['broadcast']['check']['receivers']]), callback_data = 'empty_callback')
+    btn5 = types.InlineKeyboardButton(text = 'Начать рассылку', callback_data = 'broadcast_check::start')
+    kb.add(btn1, btn2, btn3)
+    kb.add(btn4, btn5)
+    return kb
+    
+def generate_user_groups(user_id):
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    user_settings = ujson.loads(api.get_user_param(user_id, 'settings'))
+    btns = []
+    for i in user_settings['admined_groups']:
+        btn = types.InlineKeyboardButton(text = i['title'], callback_data = 'settings::{chat_id}'.format(chat_id = i['chat_id']))
+        btns.append(btn)
+    kb.add(*btns)
+    kb.add(types.InlineKeyboardButton(text = 'В главное меню', callback_data = 'to_main_menu'))
+    return kb
+    
 @bot.channel_post_handler(content_types=['text'], func = lambda msg: msg.chat.id == secret_config.channel_ID)
 def bot_broadcast(msg):
     bot.forward_message(secret_config.adminID, msg.chat.id, msg.forward_from_message_id)
 
 
-@bot.message_handler(commands = ['leave'], func = lambda msg: msg.chat.type != 'private' and utils.check_status(msg))
+@bot.message_handler(commands = ['leave'], func = lambda msg: msg.chat.type != 'private' and utils.check_status(msg.from_user.id, msg.chat.id))
 def bot_leave(msg):
     bot.send_message(
         msg.chat.id,
@@ -264,6 +332,14 @@ def bot_group_start(msg):
 def bot_logs(msg):
     bot.send_document(msg.chat.id, open('logs.txt', 'rb'))
 
+@bot.message_handler(commands = ['menu'])
+def bot_user_menu(msg):
+    bot.send_message(
+        msg.from_user.id,
+        'Ваше меню',
+        reply_markup = generate_user_menu_kb(msg.from_user.id)
+    )
+
 @bot.message_handler(commands=['set_text'], func = lambda msg: msg.chat.type != 'private')
 def bot_set_text(msg):
     start_time = time.time()
@@ -296,7 +372,7 @@ def bot_ban_me_please(msg):
         t = random.randint(1, 10)
         ban_time = 60*t
         try:
-            if not utils.check_status(msg):
+            if not utils.check_status(msg.from_user.id, msg.chat.id):
                 bot.restrict_chat_member(
                     msg.chat.id,
                     msg.from_user.id,
@@ -335,12 +411,20 @@ def bot_lang(msg):
 @bot.message_handler(commands=['ping'])
 def bot_ping(msg):
     start_timee = time.time()
+    uptime = datetime.timedelta(seconds = int(time.time()-start_time))
+    working_time = datetime.timedelta(seconds = int(time.time()-msg.date))
+    uptime_str = str(uptime).replace('day', 'days').replace('dayss', 'days')
+    working_time_str = str(working_time).replace('day', 'days').replace('dayss', 'days')
+    if uptime.days != 0:
+        uptime_str = uptime_str.replace(uptime_str.split(',')[0], utils.get_text_translation(uptime_str.split(',')[0]), 'ru')
+    if working_time.days != 0:
+        working_time_str = working_time_str.replace(working_time_str.split(',')[0], utils.get_text_translation(working_time_str.split(',')[0], 'ru'))
     bot.send_message(
         msg.chat.id,
         text.user_messages['ru']['commands']['ping'].format(
-            unix_time = datetime.datetime.time(datetime.datetime.now()),
-            working_time = round((time.time()-msg.date), 3),
-            uptime_sec = int(time.time()-start_time)
+            unix_time = datetime.datetime.fromtimestamp(int(time.time())),
+            working_time = working_time_str,
+            uptime_sec = uptime
         ),
         reply_to_message_id=msg.message_id,
         parse_mode='HTML'
@@ -352,8 +436,6 @@ def bot_ping(msg):
 def bot_users_new(msg):
     api.register_new_chat(msg.chat)
     start_time = time.time()
-    message = msg
-    api.register_new_chat(msg.chat)
     if api.get_group_params(msg.chat.id)['deletions']['system']:
         bot.delete_message(
             msg.chat.id,
@@ -369,7 +451,6 @@ def bot_users_new(msg):
             msg.chat.id
             )
     if msg.new_chat_member.id == 495038140:
-        api.register_new_chat(msg.chat)
         api.change_group_params(msg.chat.id, ujson.dumps(config.default_group_settings))
     else:
         if api.get_group_params(msg.chat.id)['restrictions']['read_only']:
@@ -454,14 +535,27 @@ def bot_check_system(msg):
 def bot_report(msg):
     start_time = time.time()
     admins = bot.get_chat_administrators(msg.chat.id)
+    chat = bot.get_chat(msg.chat.id)
+    msg_id = ''
+    if chat.username:
+        if msg.reply_to_message:
+            msg_id = msg.reply_to_message.message_id
+            txt = text.reports_messages['report']['to_admin']['have_username']['reply']
+        else:
+            msg_id = msg.message_id
+            txt = text.reports_messages['report']['to_admin']['have_username']['no_reply']
+    else:
+        txt = text.reports_messages['report']['to_admin']['no_username']
     for i in admins:
         try:
             bot.send_message(
                 i.user.id,
-                text.reports_messages['report']['to_admin'].format(
+                txt.format(
                     group_name = api.replacer(msg.chat.title),
+                    group_username = chat.username,
+                    message_id = msg_id,
                     user_id = msg.from_user.id,
-                    user_name = api.replacer(msg.from_user.first_name)
+                    user_name = api.replacer(msg.from_user.first_name),
                 ),
                 parse_mode='HTML'
             )
@@ -477,11 +571,11 @@ def bot_report(msg):
 @bot.message_handler(commands = ['unban'], func = lambda msg: msg.chat.type != 'private')
 def bot_user_unban(msg):
     start_time = time.time()
-    if utils.check_status(msg) and utils.have_args(msg):
+    if utils.check_status(msg.from_user.id, msg.chat.id) and utils.have_args(msg):
         words = utils.parse_arg(msg)[1]
         user_id = int(words)
         utils.unban_user(msg, user_id)
-    elif utils.check_status(msg) and not utils.have_args(msg):
+    elif utils.check_status(msg.from_user.id, msg.chat.id) and not utils.have_args(msg):
         utils.no_args(msg)
     else:
         utils.not_enought_rights(msg)
@@ -490,7 +584,7 @@ def bot_user_unban(msg):
 @bot.message_handler(commands = ['reregister'], func = lambda msg: msg.chat.type == 'supergroup')
 def bot_reregister(msg):
     start_time = time.time()
-    if utils.check_status(msg):
+    if utils.check_status(msg.from_user.id, msg.chat.id):
         api.register_new_chat(msg.chat)
         api.change_group_params(msg.chat.id, ujson.dumps(config.default_group_settings))
     bot.send_message(
@@ -502,7 +596,7 @@ def bot_reregister(msg):
 @bot.message_handler(commands=['ro'], func=lambda msg: msg.chat.type == 'supergroup')
 def bot_users_ro(msg):
     start_time = time.time()
-    if utils.check_status(msg):
+    if utils.check_status(msg.from_user.id, msg.chat.id):
         utils.read_only(msg)
     else:
         utils.not_enought_rights(msg)
@@ -511,7 +605,7 @@ def bot_users_ro(msg):
 @bot.message_handler(commands=['stickerpack_ban'],func=lambda msg: msg.chat.type == 'supergroup')
 def bot_stickerpack_ban(msg):
     start_time = time.time()
-    if utils.check_status(msg):
+    if utils.check_status(msg.from_user.id, msg.chat.id):
         utils.ban_stickerpack(msg)
     else:
         utils.not_enought_rights(msg)
@@ -520,7 +614,7 @@ def bot_stickerpack_ban(msg):
 @bot.message_handler(commands=['stickerpack_unban'], func=lambda msg: msg.chat.type != 'private')
 def bot_stickerpack_unban(msg):
     start_time = time.time()
-    if utils.check_status(msg) and utils.have_args(msg):
+    if utils.check_status(msg.from_user.id, msg.chat.id) and utils.have_args(msg):
         stickerpack_name = utils.parse_arg(msg)[1]
         utils.unban_stickerpack(msg, stickerpack_name)
     utils.new_update(msg, time.time()-start_time)
@@ -529,22 +623,22 @@ def bot_stickerpack_unban(msg):
 @bot.message_handler(commands=['sticker_ban'], func=lambda msg: msg.chat.type == 'supergroup')
 def bot_sticker_ban(msg):
     start_time = time.time()
-    if utils.check_status(msg):
+    if utils.check_status(msg.from_user.id, msg.chat.id):
         sticker_id = msg.reply_to_message.sticker.file_id
         utils.ban_sticker(msg, sticker_id)
-    elif not utils.check_status(msg):
+    elif not utils.check_status(msg.from_user.id, msg.chat.id):
         utils.not_enought_rights(msg)
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['sticker_unban'], func=lambda msg: msg.chat.type == 'supergroup')
 def bot_sticker_unban(msg):
     start_time = time.time()
-    if utils.have_args(msg) and utils.check_status(msg):
+    if utils.have_args(msg) and utils.check_status(msg.from_user.id, msg.chat.id):
         sticker_id = utils.parse_arg(msg)[1]
         utils.unban_sticker(msg, sticker_id)
-    elif check_status(msg) and not utils.have_args(msg):
+    elif utils.check_status(msg.from_user.id, msg.chat.id) and not utils.have_args(msg):
         utils.not_enought_rights(msg)
-    elif utils.have_args(msg) and not check_status(msg):
+    elif utils.have_args(msg) and not check_status(msg.from_user.id):
         utils.no_args(msg)
     utils.new_update(msg, time.time()-start_time)
 
@@ -570,7 +664,7 @@ def bot_about(msg):
 @bot.message_handler(commands=['warn'], func=lambda msg: msg.chat.type != 'private')
 def bot_new_warn(msg):
     start_time = time.time()
-    if utils.check_status(msg):
+    if utils.check_status(msg.from_user.id, msg.chat.id):
         utils.new_warn(msg)
     else:
         utils.not_enought_rights(msg)
@@ -601,77 +695,16 @@ def bot_get_id(msg):
 #         text.
 #     )
 
-@bot.message_handler(commands = ['get_users'], func = lambda msg: msg.chat.type != 'private')
-def bot_get_users(msg):
-    start_time = time.time()
-    chat_obj = utils.get_chat_info(msg.chat.id)
-    users_list = api.get_chat_users(msg.chat.id, 50)
-    all_users = api.get_chat_users(msg.chat.id, api.get_chat_users_count(msg.chat.id))
-    
-    summ = 0
-    counter = 0
-    for i in all_users:
-        counter += 1
-        if int(i['user_id']) == msg.from_user.id:
-            fixer = counter
-    for i in users_list:
-        summ = summ + int(i['amount'])
-    counter = 0
-    mes = text.group_commands[utils.get_group_lang(msg)]['get_users']['title'].format(
-        chat_name = chat_obj.title,
+@bot.message_handler(commands = ['version'])
+def bot_version(msg):
+    bot.send_message(
+        msg.chat.id,
+        text.user_messages[utils.get_user_lang(msg)]['commands']['version'].format(version = text.VERSION),
+        parse_mode = 'HTML'
     )
-    for i in users_list:
-        counter += 1
-        mes = mes + text.group_commands[utils.get_group_lang(msg)]['get_users']['body_notify'].format(
-            user_number = counter,
-            user_id = i['user_id'],
-            user_name = api.replacer(i['user_name']),
-            user_count = i['amount'],
-            percent = round(int(i['amount'])/summ*100, 2)
-        )    
-    mes = mes + text.group_commands[utils.get_group_lang(msg)]['get_users']['end'].format(
-        users_count = api.get_chat_users_count(msg.chat.id),
-        messages_count = summ,
-        used_time = round((time.time()-start_time), 3),
-        user_place = fixer
-    )
-    try:
-        bot.send_message(
-            msg.from_user.id,
-            mes,
-            parse_mode = 'HTML'   
-        )
-        bot.reply_to(
-            msg,
-            text.group_commands[utils.get_group_lang(msg)]['chat_response']['success']
-        )
-    except Exception:
-        bot.send_message(
-            msg.chat.id,
-            text.group_commands[utils.get_group_lang(msg)]['chat_response']['error']
-        )
-    utils.new_update(msg, time.time()-start_time)
 
-@bot.message_handler(commands = ['get_all'], func = lambda msg: msg.chat.type != 'private')
-def bot_username_all(msg):
-    start_time = time.time()
-    try:
-        bot.send_message(
-            msg.from_user.id,
-            mes,
-            parse_mode = 'HTML'   
-        )
-        bot.reply_to(
-            msg,
-            text.user_messages[utils.get_group_lang(msg)]['commands']['chat_response']['success']
-        )
-    except Exception:
-        bot.send_message(
-            msg.chat.id,
-            text.user_messages[utils.get_group_lang(msg)]['commands']['chat_response']['error']
-        )
     
-@bot.message_handler(commands = ['set_rules'], func = lambda msg: utils.check_status(msg))
+@bot.message_handler(commands = ['set_rules'], func = lambda msg: utils.check_status(msg.from_user.id, msg.chat.id))
 def bot_set_rules(msg):
     start_time = time.time()
     message = msg
@@ -712,7 +745,7 @@ def bot_reset_settings(msg):
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton(text = 'Да, выполнить сброс', callback_data = 'reset_settings_confirmation::{chat_id}'.format(chat_id = msg.chat.id)))
     kb.add(types.InlineKeyboardButton(text = 'Нет, не стоит', callback_data = 'reset_settings_abort::{chat_id}'.format(chat_id = msg.chat.id)))
-    if utils.check_status(msg):
+    if utils.check_status(msg.from_user.id, msg.chat.id):
         bot.send_message(
             msg.chat.id,
             'Вы действительно хотите сбросить настройки?',
@@ -720,12 +753,18 @@ def bot_reset_settings(msg):
         )
         
 
+@bot.message_handler(commands = ['update_time'], func = lambda msg: utils.check_super_user(msg.from_user.id))
+def bot_update_time(msg):
+    bot_ping(msg)
+    subprocess.run("timedatectl set-time '{time}'".format(time = datetime.datetime.fromtimestamp(msg.date+1).strftime("%Y-%m-%d %H:%M:%S")), shell=True)
+    bot_ping(msg)
+
 @bot.message_handler(content_types=['text'], func = lambda msg: msg.chat.type != 'private')
 def bot_check_text(msg):
     start_time = time.time()
     msg_text = msg.text
     msg_text_low = msg_text.lower()
-    if utils.is_restricted(msg) and not utils.check_status(msg):
+    if utils.is_restricted(msg) and not utils.check_status(msg.from_user.id, msg.chat.id):
         bot.delete_message(
             msg.chat.id,
             msg.message_id
@@ -736,7 +775,7 @@ def bot_check_text(msg):
         elif msg_text.lower() in ['глобал бан']:
                 if utils.check_super_user(msg.from_user.id):
                     utils.global_ban(msg)
-        elif not utils.check_status(msg):
+        elif not utils.check_status(msg.from_user.id, msg.chat.id):
             # if utils.is_new_in_chat(msg) and api.get_group_params(msg.chat.id)['restrict_new'] == '1':
             if utils.check_for_urls(msg) and api.get_group_params(msg.chat.id)['deletions']['url']:
                     bot.delete_message(
@@ -772,35 +811,208 @@ def bot_text(msg):
     bot.reply_to(msg, "<code>'{}': '{}',</code>".format(msg.photo[0].file_id, msg.caption), parse_mode ='HTML')
     utils.new_update(msg, time.time()-start_time)
 
-
-@bot.message_handler(content_types = ['audio', 'document', 'photo', 'sticker', 'video', 'video_note', 'voice', 'location', 'contact'])
-def testt(msg):
+@bot.message_handler(content_types = ['sticker'], func = lambda msg: not utils.check_status(msg.from_user.id, msg.chat.id))
+def bot_check_sticker(msg):
     start_time = time.time()
-    print(utils.is_restricted(msg))
-    if utils.is_restricted(msg) and not utils.check_status(msg):
+    if utils.is_restricted(msg) or utils.is_sticker_restricted(msg):
         bot.delete_message(
             msg.chat.id,
             msg.message_id
         )
     utils.new_update(msg, time.time()-start_time)
 
+@bot.message_handler(content_types = ['audio', 'document', 'photo', 'sticker', 'video', 'video_note', 'voice', 'location', 'contact'], func = lambda msg: not utils.check_status(msg.from_user.id, msg.chat.id))
+def testt(msg):
+    start_time = time.time()
+    if utils.is_restricted(msg):
+        bot.delete_message(
+            msg.chat.id,
+            msg.message_id
+        )
+    utils.new_update(msg, time.time()-start_time)
+
+
+
 # Кнопки
 
-@bot.callback_query_handler(func=lambda c: c.data.endswith('lang'))
+@bot.callback_query_handler(func = lambda c: c.data in ['my_chats', 'to_groups_list'])
+def my_chats_list(c):
+    user_id = c.from_user.id
+    user_settings = api.get_user_param(user_id, 'settings')
+    bot.edit_message_text(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        text = 'Список ваших групп'
+    )
+    bot.edit_message_reply_markup(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        reply_markup = generate_user_groups(user_id)
+    )
+    bot.answer_callback_query(
+        callback_query_id = c.id,
+        text = 'Переход выполнен'
+    )
+
+@bot.callback_query_handler(func = lambda c: c.data.startswith('get_settings_json'))
+def bot_get_settings_json(c):
+    chat_id = utils.parse_chat_id(c)
+    bot.send_message(
+        chat_id = c.from_user.id,
+        text = 'Эти настройки можно получить в любое время и отправить @f0rden для восстановления их, в случае сбоя:\n'+ujson.dumps(api.get_group_params(chat_id))
+    )
+    
+@bot.callback_query_handler(func = lambda c: c.data == 'stats_menu')
+def bot_stats_menu(c):
+    bot.edit_message_text(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        text = text.service_messages['stats'].format(
+            all_users = api.get_users_count(),
+            all_chats = api.get_chats_count(),
+            unblocked_users = api.get_unblocked_users_count(),
+            unblocked_chats = api.get_unblocked_chats_count()
+        )
+    )
+    
+    
+@bot.callback_query_handler(func = lambda c: c.data == 'change_lang')
+def bot_change_lang(c):
+    user_id = c.from_user.id
+    bot.edit_message_text(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        text = text.user_messages['start'], 
+        parse_mode = 'HTML'
+    )
+    bot.edit_message_reply_markup(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        reply_markup = create_user_language_keyboard()
+    )
+    bot.answer_callback_query(
+        callback_query_id = c.id,
+        text = 'Переход выполнен'
+    )   
+    
+@bot.callback_query_handler(func = lambda c: c.data.startswith('settings::'))
+def chat_settings(c):
+    chat_id = utils.parse_chat_id(c)
+    bot.edit_message_text(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        text = '<b>Настройки группы {}</b>'.format(bot.get_chat(chat_id).title), 
+        parse_mode = 'HTML'
+    )
+    bot.edit_message_reply_markup(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id, 
+        reply_markup = group_setting(chat_id),
+    )
+    
+@bot.callback_query_handler(func = lambda c: c.data == 'to_main_menu')
+def bot_to_main_menu(c):
+    bot.edit_message_text(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        text = 'Ваше меню'
+    )
+    bot.edit_message_reply_markup(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        reply_markup = generate_user_menu_kb(c.from_user.id)
+    )
+
+@bot.callback_query_handler(func = lambda c: c.data == 'broadcast_menu')
+def bot_admin_menu(c):
+    bot.edit_message_text(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        text = 'Выберите тип рассылки'
+    )
+    bot.edit_message_reply_markup(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        reply_markup = generate_broadcast_vars_menu_kb()
+    )
+
+@bot.callback_query_handler(func = lambda c: c.data == 'check_broadcast')
+def bot_admin_menu(c):
+    bot.edit_message_text(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        text = 'Рассылка начата'
+    )
+    bot.edit_message_reply_markup(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        reply_markup = generate_broadcast_check_menu_kb()
+    )   
+    
+@bot.callback_query_handler(func = lambda c: c.data.startswith('broadcast_check'))
+def bot_broadcast_check(c):
+    arg = c.data.split('::')[1]
+    curr_bot_settings = ujson.loads(api.get_bot_settings(secret_config.token))
+    if arg in ['users', 'chats', 'all']:
+        curr_bot_settings['broadcast']['check']['recievers'] = arg
+        api.change_bot_settings(secret_config.token, ujson.dumps(curr_bot_settings))
+        bot.edit_message_reply_markup(
+            chat_id = c.message.chat.id,
+            message_id = c.message.message_id,
+            reply_markup = generate_broadcast_check_menu_kb()
+        )
+        bot.answer_callback_query(
+            callback_query_id = c.id,
+            text = 'Изменения подтверждены.'
+        )
+    else:
+        t = Thread(target = utils.make_broadcast, kwargs = {
+            'is_test': True, 
+            'receivers': curr_bot_settings['broadcast']['check']['recievers'], 
+            'cont_type': 'text',
+            'msg_text': '',
+            'file_id': '',
+            'user_id': c.from_user.id,
+            'message_id': c.message.message_id
+            }
+        )
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton(text = 'В главное меню', callback_data = 'to_main_menu'))
+        bot.edit_message_reply_markup(
+            chat_id = c.message.chat.id,
+            message_id = c.message.message_id,
+            reply_markup = kb
+        )
+        t.start()       
+        t.join()
+    
+@bot.callback_query_handler(func = lambda c: c.data == 'admin_menu')
+def bot_admin_menu(c):
+    bot.edit_message_text(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        text = 'Админка'
+    )
+    bot.edit_message_reply_markup(
+        chat_id = c.message.chat.id,
+        message_id = c.message.message_id,
+        reply_markup = generate_admin_menu_kb()
+    )
+    
+@bot.callback_query_handler(func=lambda c: c.data.startswith('lang::'))
 def change_language(c):
-    words = re.split('_', c.data)
-    lang = words[0]
+    words = re.split('::', c.data)
+    lang = words[1]
     bot.edit_message_text(
         chat_id = c.message.chat.id,
         message_id = c.message.message_id,
         text = text.user_messages[lang]['chosen_language'])
     api.register_new_user(c.from_user, lang)
-    # utils.new_referral(call.message, referer)
 
 @bot.callback_query_handler(func = lambda c: c.data.startswith('get_notifications'))
 def notify_change(c):
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         utils.change_state_main(chat_id, 'get_notifications')
         bot.edit_message_reply_markup(
             chat_id=c.message.chat.id,
@@ -821,7 +1033,7 @@ def notify_change(c):
 @bot.callback_query_handler(func = lambda c: c.data.startswith('del_url'))
 def del_url(c):
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         utils.change_state_deletions_main(chat_id, 'url')
         bot.edit_message_reply_markup(
             chat_id=c.message.chat.id,
@@ -842,7 +1054,7 @@ def del_url(c):
 @bot.callback_query_handler(func = lambda c: c.data.startswith('del_system'))
 def del_system(c):
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         utils.change_state_deletions_main(chat_id, 'system')
         bot.edit_message_reply_markup(
             chat_id=c.message.chat.id,
@@ -863,7 +1075,7 @@ def del_system(c):
 @bot.callback_query_handler(func = lambda c: c.data.startswith('kick_bots'))
 def kick_bots(c):
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         utils.change_state_main(chat_id, 'kick_bots')
         bot.edit_message_reply_markup(
             chat_id=c.message.chat.id,
@@ -894,15 +1106,12 @@ def to_deletions(c):
         text = 'Переход выполнен.'
     )
 
-@bot.callback_query_handler(func = lambda c: c.data.startswith('delete_'))
+@bot.callback_query_handler(func = lambda c: c.data.startswith('delete::'))
 def group_settings_deletions(c):
     chat_id = utils.parse_chat_id(c)
-    cont_type = re.split('_', c.data)[1].split('::')[0]
-    if utils.check_status_button(c):
-        if c.data == 'delete_video_note':
-            utils.change_state_deletions_files(chat_id, 'video_note')
-        else:
-            utils.change_state_deletions_files(chat_id, cont_type)
+    cont_type = re.split('::', c.data)[1]
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
+        utils.change_state_deletions_files(chat_id, cont_type)
         bot.edit_message_reply_markup(
             chat_id = c.message.chat.id,
             message_id = c.message.message_id,
@@ -922,7 +1131,7 @@ def group_settings_deletions(c):
 @bot.callback_query_handler(func = lambda c: c.data.startswith('change_all'))
 def group_settings_deletions_all(c):
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         for i in config.available_attachments:
             utils.change_state_deletions_files(chat_id, i)
         bot.edit_message_reply_markup(
@@ -940,7 +1149,7 @@ def group_settings_deletions_all(c):
             show_alert = True,
             text = 'У вас недостаточно прав для выполнения этого действия.'
         )
-@bot.callback_query_handler(func = lambda c: c.data.startswith('to_main_menu'))
+@bot.callback_query_handler(func = lambda c: c.data.startswith('to_group_settings_menu'))
 def group_settings_deletions_photo(c):
     chat_id = utils.parse_chat_id(c)
     bot.edit_message_reply_markup(
@@ -957,7 +1166,7 @@ def group_settings_deletions_photo(c):
 def del_warns(c):
     user_id = utils.parse_user_id(c)
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         api.zeroing_warns(user_id, chat_id)
         bot.edit_message_text(
             text = 'Предупреждения обнулены.',
@@ -983,7 +1192,7 @@ def new_users_restrictions(c):
 @bot.callback_query_handler(func = lambda c: c.data.startswith('read_only'))
 def new_users_ro(c):
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         settings = api.get_group_params(chat_id)
         settings['restrictions']['read_only'] = config.settings_states[settings['restrictions']['read_only']]
         api.change_group_params(chat_id, ujson.dumps(settings))
@@ -1007,7 +1216,7 @@ def new_users_ro(c):
 def ro_time_change(c):
     change_time = int(c.data.split('_')[2].split('::')[0])
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         settings = api.get_group_params(chat_id)
         settings['restrictions']['for_time'] = settings['restrictions']['for_time'] + change_time
         if settings['restrictions']['for_time'] < 1:
@@ -1033,7 +1242,7 @@ def ro_time_change(c):
 def ro_time_change(c):
     change_count = int(c.data.split('_')[2].split('::')[0])
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         settings = api.get_group_params(chat_id)
         settings['warns']['count'] = settings['warns']['count'] + change_count
         if settings['warns']['count'] < 1:
@@ -1072,7 +1281,7 @@ def warns_count_change(c):
 def warns_count_change(c):
     new_mod = int(c.data.split('_')[2].split('::')[0])
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         settings = api.get_group_params(chat_id)
         settings['warns']['action'] = new_mod
         api.change_group_params(chat_id, ujson.dumps(settings))
@@ -1097,7 +1306,7 @@ def unban_new_user(c):
     chat_id = utils.parse_chat_id(c)
     user_id = utils.parse_user_id(c)
     if api.get_group_params(chat_id)['restrictions']['admins_only']:
-        if utils.check_status_button(c):
+        if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
             utils.unban_user_button(c)
             user = bot.get_chat_member(
                 chat_id,
@@ -1121,7 +1330,7 @@ def unban_new_user(c):
                 text = 'У вас недостаточно прав для выполнения этого действия.'
             )
     else:
-        if c.from_user.id == user_id or utils.check_status_button(c):
+        if c.from_user.id == user_id or utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
             user = bot.get_chat_member(
                 chat_id,
                 user_id
@@ -1157,7 +1366,7 @@ def unban_new_user(c):
 def warns_count_change(c):
     chat_id = utils.parse_chat_id(c)
     state = c.data.split('_')[4].split('::')[0]
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         settings = api.get_group_params(chat_id)
         settings['restrictions']['admins_only'] = utils.to_bool(state)
         api.change_group_params(chat_id, ujson.dumps(settings))
@@ -1193,7 +1402,7 @@ def welcome_settings(c):
 @bot.callback_query_handler(func = lambda c: c.data.startswith('welcome_state'))
 def welcome_settings_state(c):
     chat_id = utils.parse_chat_id(c)    
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         settings = api.get_group_params(chat_id)
         curr_state = settings['greeting']['is_enabled']
         new_state = config.settings_states[curr_state]
@@ -1219,7 +1428,7 @@ def welcome_settings_state(c):
 def welcome_timer_change(c):
     change_count = int(c.data.split('_')[2].split('::')[0])
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         settings = api.get_group_params(chat_id)
         settings['greeting']['delete_timer'] = settings['greeting']['delete_timer'] + change_count
         if settings['greeting']['delete_timer'] < 0:
@@ -1246,11 +1455,11 @@ def del_settings(c):
     words = c.data.split()
     bot.delete_message(
         c.message.chat.id,
-        words[1]
+        words[2]
     )
     bot.delete_message(
         c.message.chat.id,
-        words[2]
+        words[1]
     )
 
 @bot.callback_query_handler(func = lambda c: c.data.startswith('welcome_get'))
@@ -1265,7 +1474,7 @@ def get_welcome_text(c):
 @bot.callback_query_handler(func = lambda c: c.data.startswith('reset_settings'))
 def reset_settings_button(c):
     chat_id = utils.parse_chat_id(c)
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         if c.data.startswith('reset_settings_confirmation'):
             api.register_new_chat(c.message.chat)
             api.change_group_params(chat_id, ujson.dumps(config.default_group_settings))
@@ -1289,7 +1498,7 @@ def reset_settings_button(c):
 
 @bot.callback_query_handler(func = lambda c: c.data.startswith('leave_'))
 def bot_leave_cb(c):
-    if utils.check_status_button(c):
+    if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
         if c.data.endswith('confirm'):
             bot.delete_message(
                 c.message.chat.id,
@@ -1315,7 +1524,7 @@ def bot_leave_cb(c):
 # @bot.callback_query_handler(func = lambda c: c.data.startswith('settings_captcha'))
 # def change_captcha_settings(c):
 #     chat_id = utils.parse_chat_id(c)
-#     if utils.check_status_button(c):
+#     if utils.check_status(c.from_user.id, utils.parse_chat_id(c)):
 #         settings = api.get_group_params(chat_id)
 #         settings['']
 #         api.change_group_params(chat_id, )

@@ -1,18 +1,20 @@
 # coding: utf8
 
+import datetime
 import hashlib
 import logging
 import random
 import re
 import time
 from hashlib import md5
-
+import cache_worker
 import pymysql
 import requests
 import telebot
 from telebot import types
 
 import api
+import cache_file
 import config
 import secret_config
 import text
@@ -48,12 +50,6 @@ logging.basicConfig(
 #                 #
 ############################################################
 
-def new_referral(msg, referrer_id=303986717):
-    r = api.get_user_param(referrer_id, 'refs')
-    r = int(r)
-    r += 1 
-    api.set_user_param(referrer_id, 'refs', r)
-
 def notify_new_user(user_obj, lang):
     bot.send_message(
         secret_config.reports_group_id,
@@ -61,7 +57,7 @@ def notify_new_user(user_obj, lang):
             user_id = user_obj.id,
             user_name = api.replacer(user_obj.first_name),
             user_amount = api.get_users_count(),
-            user_lang = config.languages[lang]
+            user_lang = config.human_langs[lang]
         ),
         parse_mode='HTML'
     )
@@ -82,7 +78,7 @@ def notify_new_chat(chat_obj):
     )
 
 def get_user_lang(msg):
-    r = api.get_user_param(msg.chat.id, 'language')
+    r = ujson.loads(api.get_user_param(msg.chat.id, 'settings'))['language']
     return r
 
 def is_new_in_chat(msg):
@@ -98,7 +94,7 @@ def is_user_new(msg):
     return r
 
 def check_super_user(user_id):
-    if user_id in [303986717, 207737178]:
+    if user_id in secret_config.super_admins:
         return True
     else:
         return False
@@ -296,48 +292,40 @@ def set_rules(msg, rules):
 #                        #
 ############################################################
 
-def check_status(msg):
+def check_status(user_id, chat_id):
     res = False
     try:
-        admins = bot.get_chat_administrators(msg.chat.id)
-        for i in admins:
-            if i.user.id == msg.from_user.id:
-                res = True
-        if msg.from_user.id == 303986717:
+        if user_id == 303986717:
             res = True
+        admins = bot.get_chat_administrators(chat_id)
+        for i in admins:
+            if i.user.id == user_id:
+                res = True
     except Exception as e:
         logging.error(e)
     return res
-
-def check_status_button(c):
-    chat_id = parse_chat_id(c)
-    user_id = c.from_user.id
-    res = False
-    admins = bot.get_chat_administrators(chat_id)
-    for i in admins:
-        if i.user.id == user_id:
-            res = True
-    if user_id == 303986717:
-        res = True
-    return res
     
 def ban_user(msg):
-    if check_status(msg):
+    if check_status(msg.from_user.id, msg.chat.id):
         kb = types.InlineKeyboardMarkup()
-        btn = types.InlineKeyboardButton(text = 'Разбанить', callback_data='unban {user_id} {chat_id}'.format(
-            user_id = msg.reply_to_message.from_user.id,
-            chat_id = msg.chat.id
-            ))
+        btn = types.InlineKeyboardButton(
+            text = 'Разбанить', 
+            callback_data='unban::{user_id}'.format(
+                user_id = msg.reply_to_message.from_user.id,
+            )
+        )
         kb.add(btn)
         bot.kick_chat_member(
             msg.chat.id,
             msg.reply_to_message.from_user.id,
             until_date = str(time.time() + 31708800))
-        bot.reply_to(msg, text.group_commands[get_group_lang(msg)]['users']['banned'].format(
-            user_name = api.replacer(msg.reply_to_message.from_user.first_name),
-            user_id = msg.reply_to_message.from_user.id,
-            admin_name = api.replacer(msg.from_user.first_name),
-            admin_id = msg.from_user.id
+        bot.reply_to(
+            msg, 
+            text.group_commands[get_group_lang(msg)]['users']['banned'].format(
+                user_name = api.replacer(msg.reply_to_message.from_user.first_name),
+                user_id = msg.reply_to_message.from_user.id,
+                admin_name = api.replacer(msg.from_user.first_name),
+                admin_id = msg.from_user.id
             ),
             reply_markup = kb,
             parse_mode = 'HTML'
@@ -346,7 +334,7 @@ def ban_user(msg):
         not_enought_rights(msg)
 
 def kick_user(msg):
-    if check_status(msg):
+    if check_status(msg.from_user.id, msg.chat.id):
         if msg.reply_to_message:
             bot.kick_chat_member(
                 msg.chat.id,
@@ -354,11 +342,13 @@ def kick_user(msg):
                 until_date = str(time.time() + 31)
             )
             bot.unban_chat_member(msg.chat.id, msg.reply_to_message.from_user.id)
-            bot.reply_to(msg, text.group_commands[get_group_lang(msg)]['users']['kick'].format(
-                user_name = api.replacer(msg.reply_to_message.from_user.first_name),
-                user_id = msg.reply_to_message.from_user.id,
-                admin_name = api.replacer(msg.from_user.first_name),
-                admin_id = msg.from_user.id
+            bot.reply_to(
+                msg, 
+                text.group_commands[get_group_lang(msg)]['users']['kick'].format(
+                    user_name = api.replacer(msg.reply_to_message.from_user.first_name),
+                    user_id = msg.reply_to_message.from_user.id,
+                    admin_name = api.replacer(msg.from_user.first_name),
+                    admin_id = msg.from_user.id
                 ),
                 parse_mode = 'HTML'
             )
@@ -373,11 +363,13 @@ def kick_user(msg):
                 until_date = str(time.time() + 31)
             )
             bot.unban_chat_member(msg.chat.id, usr.user.id)
-            bot.reply_to(msg, text.group_commands[get_group_lang(msg)]['users']['kick'].format(
-                user_name = api.replacer(usr.user.first_name),
-                user_id = usr.user.id,
-                admin_name = api.replacer(msg.from_user.first_name),
-                admin_id = msg.from_user.id
+            bot.reply_to(
+                msg, 
+                text.group_commands[get_group_lang(msg)]['users']['kick'].format(
+                    user_name = api.replacer(usr.user.first_name),
+                    user_id = usr.user.id,
+                    admin_name = api.replacer(msg.from_user.first_name),
+                    admin_id = msg.from_user.id
                 ),
                 parse_mode = 'HTML'
             )
@@ -389,10 +381,17 @@ def read_only(msg):
         ban_time = parse_time(parse_arg(msg)[1])
     else:
         ban_time = 60
+    untildate = msg.date + ban_time
     bot.restrict_chat_member(
         msg.chat.id,
         msg.reply_to_message.from_user.id,
-        until_date=str(time.time() + ban_time))
+        until_date = untildate
+    )
+    ban_datetime = datetime.timedelta(seconds = ban_time)
+    ban_time_str = str(ban_datetime).replace('day', 'days').replace('dayss', 'days')
+    if ban_datetime.days != 0:
+        ban_time_str = ban_time_str.replace(ban_time_str.split(',')[0], get_text_translation(str(ban_datetime).split(',')[0], 'ru'))
+    until_date_human = get_text_translation(datetime.datetime.fromtimestamp(untildate).strftime('%A, %d %B %Y, %H:%M'), 'ru')
     bot.send_message(
         msg.chat.id,
         text.group_commands['ru']['users']['ro'].format(
@@ -400,10 +399,12 @@ def read_only(msg):
             admin_name = api.replacer(msg.from_user.first_name),
             user_id = msg.reply_to_message.from_user.id,
             user_name = api.replacer(msg.reply_to_message.from_user.first_name),
-            time_sec = ban_time
+            time_sec = ban_time_str,
+            until_date = until_date_human
         ),
         parse_mode='HTML',
-        disable_web_page_preview=True)
+        disable_web_page_preview=True
+    )
 
 def parse_time(arg):
     amount = int(arg[:len(arg)-1:1])
@@ -551,9 +552,118 @@ def set_voteban_votes_count(vote_hash, votes_count):
 #             #
 ############################################################
 
+def make_broadcast(is_test = True, receivers = 'users', cont_type = 'text', msg_text = '', file_id = '', user_id = 303986717, message_id = 0):
+    chats = []
+    if receivers in ['users', 'all']:
+        chats.extend(api.get_users())
+    if receivers in ['chats', 'all']:
+        chats.extend(api.get_chats())
+    broadcast_stats = {
+        'start_time': int(time.time()),
+        'users': {
+            'count': api.get_users_count(),
+            'succ': 0,
+            'errors': 0
+        },
+        'chats': {
+            'count': api.get_chats_count(),
+            'succ': 0,
+            'errors': 0
+        }
+    }
+    counter = 0
+    max_counter = len(chats)
+    max_part = max_counter//20
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton(text = 'В главное меню', callback_data = 'to_main_menu'))
+    for i in chats:
+        counter += 1
+        try:
+            chat_id = i['chat_id']
+            chat_type = 'chats'
+        except Exception:
+            chat_id = i['user_id']
+            chat_type = 'users'
+        if is_test:
+            try:
+                bot.send_chat_action(chat_id, 'typing')
+                broadcast_stats[chat_type]['succ'] = broadcast_stats[chat_type]['succ'] + 1
+            except Exception as e:
+                broadcast_stats[chat_type]['errors'] = broadcast_stats[chat_type]['errors'] + 1
+        else:
+            if cont_type == 'text':
+                try:
+                    bot.send_message(chat_id, text = msg_text, parse_mode = 'HTML')
+                    broadcast_stats[chat_type]['succ'] = broadcast_stats[chat_type]['succ'] + 1
+                except Exception as e:
+                    broadcast_stats[chat_type]['errors'] = broadcast_stats[chat_type]['errors'] + 1
+            else:
+                try:
+                    send_file(chat_id, cont_type, file_id, msg_text)
+                    broadcast_stats[chat_type]['succ'] = broadcast_stats[chat_type]['succ'] + 1
+                except Exception as e:
+                    broadcast_stats[chat_type]['errors'] = broadcast_stats[chat_type]['errors'] + 1
+        if counter % 50 == 0 or counter == max_counter:
+            used_time = round(time.time()-broadcast_stats['start_time'], 2)
+            speed = round(counter/used_time, 2)
+            curr_perc_all = counter/max_counter*100
+            used_dots_all = int(curr_perc_all//(100/20))
+            last_dots_all = int(20 - used_dots_all)
+            curr_perc_users = broadcast_stats['users']['succ']/broadcast_stats['users']['count']*100
+            used_dots_users = int(curr_perc_users//(100/20))
+            last_dots_users = int(20 - used_dots_users)
+            curr_perc_chats = broadcast_stats['chats']['succ']/broadcast_stats['chats']['count']*100
+            used_dots_chats = int(curr_perc_chats//(100/20))
+            last_dots_chats = int(20 - used_dots_chats)
+            try:
+                print(chat_id, message_id)
+                bot.edit_message_text(
+                    chat_id = user_id,
+                    message_id = message_id,
+                    text = text.service_messages['broadcast'][receivers].format(
+                        all_chats = max_counter,
+                        chats_sent = counter,
+                        all_perc = round(counter/max_counter*100, 2),
+                        successfully_sent_users = broadcast_stats['users']['succ'],
+                        errors_sent_users = broadcast_stats['users']['errors'],
+                        successfully_sent_chats = broadcast_stats['chats']['succ'],
+                        errors_sent_chats = broadcast_stats['chats']['errors'],
+                        perc_suc_users = round(broadcast_stats['users']['succ']/broadcast_stats['users']['count']*100, 2),
+                        perc_err_users = round(broadcast_stats['users']['errors']/broadcast_stats['users']['count']*100, 2),
+                        perc_suc_chats = round(broadcast_stats['chats']['succ']/broadcast_stats['chats']['count']*100, 2),
+                        perc_err_chats = round(broadcast_stats['chats']['errors']/broadcast_stats['chats']['count']*100, 2),
+                        spent_time = datetime.timedelta(seconds = int(used_time)),
+                        speed = speed,
+                        pbar_users = ('█' * used_dots_users)+('▒' * last_dots_users),
+                        pbar_chats = ('█' * used_dots_chats)+('▒' * last_dots_chats),
+                        pbar = ('█' * used_dots_all)+('▒' * last_dots_all),
+                        eta = datetime.timedelta(seconds = int((max_counter-counter)/speed))
+                    ),
+                    parse_mode = 'HTML',
+                    reply_markup = kb
+                )
+            except Exception as e:
+                print(e)
+                    
+def send_file(chat_id, content_type, file_id, caption):
+    if content_type == 'audio':
+        bot.send_audio(chat_id, file_id, caption=caption, parse_mode = 'HTML')
+    elif content_type == 'photo':
+        bot.send_photo(chat_id, file_id, caption=caption, parse_mode = 'HTML')
+    elif content_type == 'document':
+        bot.send_document(chat_id, file_id, caption=caption, parse_mode = 'HTML')
+    elif content_type == 'video':
+        bot.send_video(chat_id, file_id, caption=caption, parse_mode = 'HTML')
+    elif content_type == 'video_note':
+        bot.send_video_note(chat_id, file_id, caption=caption, parse_mode = 'HTML')
+    elif content_type == 'voice':
+        bot.send_voice(chat_id, file_id, caption=caption, parse_mode = 'HTML')
+            
+            
 def new_update(msg, end_time):
     try:
-        api.new_update(msg, end_time)
+        #api.new_update(msg, end_time)
+        pass
     except Exception as e:
         logging.error(e)
 
@@ -583,10 +693,10 @@ def parse_arg(msg):
     return words
 
 def parse_chat_id(c):
-    return int(c.data.split('::')[1])
+    return int(c.data.split('::')[-1])
 
 def parse_user_id(c):
-    return int(c.data.split('::')[2])
+    return int(c.data.split('::')[-2])
 
 def kick_user_warns(msg, max_warns):
     bot.kick_chat_member(
@@ -745,6 +855,30 @@ def get_my_ip():
     url = 'http://ipinfo.io/ip'
     s = str(requests.get(url = url).content)[2:-3:]
     return s
+
+def get_text_translation(txt, end_lang):
+    res = cache_worker.translation_search_in_cache(txt, end_lang)
+    if not res['result']:
+        proxies = {
+            'https': 'https://66.70.255.195:3128'
+        }
+        while True:
+            params = {
+                'key': random.choice(secret_config.yandex_translate_tokens),
+                'text': txt,
+                'lang': 'en-%s' % end_lang
+            }
+            r = requests.get(url = 'https://translate.yandex.net/api/v1.5/tr.json/translate', params = params, proxies = proxies).json()
+            if r['code'] == 200:
+                cache_worker.translation_add_to_cache(txt, r['text'][0], end_lang)
+                return r['text'][0]
+            else:
+                print(e)
+                # logging.error(r)
+    else:
+        return res['text']
+
+
 
 ############################################################
 ############################################################

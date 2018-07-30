@@ -3,11 +3,12 @@
 import hashlib
 import logging
 import time
-
+import cache_worker
 import pymysql
 import pymysql.cursors
 import requests
 import telebot
+from threading import Thread
 
 import config
 import secret_config
@@ -87,19 +88,45 @@ def replacer(text):
 
 
 
-def register_admins(chat_obj):
-    chat_id = chat_obj.id
-    with DataConn(db) as conn:
-        cursor = conn.cursor()
-        for i in bot.get_chat_administrators(chat_id):
-            sql = 'SELECT * FROM `chat_admins` WHERE `admin_id` = %s AND `chat_id` = %s'
-            cursor.execute(sql, (i.user.id, chat_id))
-            res = cursor.fetchone()
-            if res is None:
-                sql = 'INSERT INTO `chat_admins` (`chat_id`, `chat_name`, `admin_name`, `admin_id`, `status`) VALUES (%s, %s, %s, %s, %s)'
-                cursor.execute(sql, (chat_id, chat_obj.title, i.user.first_name, i.user.id, i.status))
-                conn.commit()
-        
+def register_admins(chat_id):
+    admins = []
+    chat_info = bot.get_chat(chat_id)
+    chat = {
+        'chat_id': chat_id,
+        'title': chat_info.title
+    }
+    chat_admins = bot.get_chat_administrators(chat_id)
+    print('Найдено {} администраторов. Ориентировочное время регистрации {} сек'.format(len(chat_admins), len(chat_admins)/5))
+    counter = 0
+    for i in chat_admins:
+        counter += 1
+        print('Зарегистрировано {}/{} администраторов. Чат: {}'.format(counter, len(chat_admins), chat_info.title))
+        try:
+            register_new_user(i.user, 'ru')
+            if i.user.is_bot == False:
+                user_settings = ujson.loads(get_user_param(i.user.id, 'settings'))
+                checker = False
+                for a in user_settings['admined_groups']:
+                    if a['chat_id'] == chat_id:
+                        checker = True
+                        a['title'] = chat_info.title
+                if not checker:
+                    user_settings['admined_groups'].append(chat)
+                change_user_param(i.user.id, 'settings', ujson.dumps(user_settings))
+            admin = {
+                'user_id': i.user.id,
+                'first_name': i.user.first_name,
+                'second_name': i.user.last_name,
+                'status': i.status
+            }
+            admins.append(admin)
+            time.sleep(0.2)
+        except Exception as e:
+            print(e)
+    curr_settings = get_group_params(chat_id)
+    curr_settings['admins'] = admins
+    change_group_params(chat_id, ujson.dumps(curr_settings))
+    print(admins)
 
 def ban_sticker(msg, sticker_id):
     """
@@ -108,14 +135,14 @@ def ban_sticker(msg, sticker_id):
     :param sticker_id:\n
     """
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `banned_stickers` WHERE `chat_id` = %s AND `sticker_id` = %s'
-        cursor.execute(sql, (msg.chat.id, sticker_id))
-        res = cursor.fetchone()
+        curs.execute(sql, (msg.chat.id, sticker_id))
+        res = curs.fetchone()
         if res is None:
             sql = 'INSERT INTO `banned_stickers`(`chat_id`, `chat_name`, `sticker_id`, `ban_time`) VALUES (%s, %s, %s, %s)'
             try:
-                cursor.execute(sql, (msg.chat.id, msg.chat.title, sticker_id, int(time.time())))
+                curs.execute(sql, (msg.chat.id, msg.chat.title, sticker_id, int(time.time())))
                 conn.commit()
             except Exception as e:
                 print(sql)
@@ -123,11 +150,11 @@ def ban_sticker(msg, sticker_id):
         else:
             if res != msg.chat.title:
                 sql = 'SELECT * FROM `banned_stickers` WHERE `chat_id` = %s'
-                cursor.execute(sql, (msg.chat.id, ))
-                res = cursor.fetchall()
+                curs.execute(sql, (msg.chat.id, ))
+                res = curs.fetchall()
                 for i in res:
                     sql = 'UPDATE `banned_stickers` SET `chat_name` = %s WHERE `chat_id` = %s'
-                    cursor.execute(sql, (msg.chat.title, msg.chat.id))
+                    curs.execute(sql, (msg.chat.title, msg.chat.id))
                     conn.commit()
 
 def unban_sticker(msg, sticker_id):
@@ -137,13 +164,13 @@ def unban_sticker(msg, sticker_id):
     :param sticker_id:\n
     """
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `banned_stickers` WHERE `chat_id` = %s and `sticker_id` = %s'
-        cursor.execute(sql, (msg.chat.id, sticker_id))
-        res = cursor.fetchone()
+        curs.execute(sql, (msg.chat.id, sticker_id))
+        res = curs.fetchone()
         if res is not None:
             sql = 'DELETE FROM `banned_stickers` WHERE `chat_id` = %s and `sticker_id` = %s'
-            cursor.execute(sql, (msg.chat.id, sticker_id))
+            curs.execute(sql, (msg.chat.id, sticker_id))
             conn.commit()
             return True
         else:
@@ -167,10 +194,10 @@ def register_new_user(user_obj, lang):
     :param lang:\n
     """
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `users` WHERE `user_id` = %s'
-        cursor.execute(sql, (user_obj.id, ))
-        res = cursor.fetchone()
+        curs.execute(sql, (user_obj.id, ))
+        res = curs.fetchone()
         sec_name = 'None'
         try:
             sec_name = user_obj.second_name
@@ -178,66 +205,107 @@ def register_new_user(user_obj, lang):
             sec_name = 'None'
             logging.error(e)
         if res is None:
-            sql = 'INSERT INTO `users` (`user_id`, `registration_time`, `first_name`, `second_name`, `language`) VALUES (%s, %s, %s, %s, %s)'
-            cursor.execute(sql, (user_obj.id, int(time.time()), user_obj.first_name, sec_name, lang))
-            conn.commit()
-            sql = 'INSERT INTO `user_settings` (`user_id`, `registration_time`, `language`) VALUES (%s, %s, %s)'
-            cursor.execute(sql, (user_obj.id, int(time.time()), lang))
+            sql = 'INSERT INTO `users` (`user_id`, `registration_time`, `first_name`, `second_name`, `language`, `settings`) VALUES (%s, %s, %s, %s, %s, %s)'
+            curs.execute(sql, (user_obj.id, int(time.time()), user_obj.first_name, sec_name, lang, ujson.dumps(config.default_user_settings)))
             conn.commit()
             utils.notify_new_user(user_obj, lang)
         else:
-            sql = 'UPDATE `user_settings` SET `language` = %s WHERE `user_id` = %s'
-            cursor.execute(sql, (lang, user_obj.id))
-            conn.commit()
+            curr_settings = ujson.loads(get_user_param(user_obj.id, 'settings'))
+            curr_settings['language'] = lang
+            change_user_param(user_obj.id, 'settings', ujson.dumps(curr_settings))
 
+def change_user_param(user_id, key, value):
+    with DataConn(db) as conn:
+        curs = conn.cursor()
+        sql = 'UPDATE `users` SET `{key}` = %s WHERE `user_id` = %s'.format(key = key)
+        curs.execute(sql, (value, user_id))
+        conn.commit()
+            
+def get_bot_settings(token):
+    with DataConn(db) as conn:
+        curs = conn.cursor()
+        sql = 'SELECT `settings` FROM `bot_settings` WHERE `token` = %s'
+        curs.execute(sql, (token, ))
+        r = curs.fetchone()
+        return r['settings']
+            
+def change_bot_settings(token, new_settings):
+    with DataConn(db) as conn:
+        curs = conn.cursor()
+        sql = 'UPDATE `bot_settings` SET `settings` = %s WHERE `token` = %s'
+        curs.execute(sql, (new_settings, token))
+        conn.commit()
+            
 def register_new_chat(chat_obj):
     """
     Регистрирует новый чат\n
     :param msg:\n
     """
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM chats WHERE `chat_id` = %s'
-        cursor.execute(sql, (chat_obj.id, ))
-        res = cursor.fetchone()
+        curs.execute(sql, (chat_obj.id, ))
+        res = curs.fetchone()
         if res is None:
             creator = get_creator(chat_obj)
             sql = 'INSERT INTO `chats` (`chat_id`, `chat_name`, `creator_name`, `creator_id`, `chat_members_count`, `registration_time`, `settings`) VALUES (%s, %s, %s, %s, %s, %s, %s)'
             try:
-                cursor.execute(sql, (chat_obj.id, chat_obj.title, creator.first_name, creator.id, bot.get_chat_members_count(chat_obj.id), int(time.time()), ujson.dumps(config.default_group_settings)))
+                curs.execute(sql, (chat_obj.id, chat_obj.title, creator.first_name, creator.id, bot.get_chat_members_count(chat_obj.id), int(time.time()), ujson.dumps(config.default_group_settings)))
                 conn.commit()
+                s = ''
+                for i in bot.get_chat_administrators(chat_obj.id):
+                    print(s)
+                    s = s + '<a href="tg://user?id={user_id}">{user_name}</a> '.format(user_id = i.user.id, user_name = i.user.first_name)
+                
+                bot.send_message(
+                    chat_obj.id,
+                    text.group_commands['ru']['registration'].format(admins = s),
+                    parse_mode = 'HTML'
+                )
             except Exception as e:
                 logging.error('error: {}'.format(e))
                 logging.error(sql)
             utils.notify_new_chat(chat_obj)
-            bot.send_message(
-                chat_obj.id,
-                text.group_commands['ru']['registration']
-            )
-            register_admins(chat_obj)
-        else:
-            register_admins(chat_obj)
+            t = Thread(target = register_admins, args = (chat_obj.id, ))
+            t.start()
+            t.join()
 
 def get_users_count():
     """
     Возвращает количество пользователей в базе\n
     """
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT COUNT(`user_id`) FROM `users`'
-        cursor.execute(sql)
-        res = cursor.fetchall()
+        curs.execute(sql)
+        res = curs.fetchone()
         return res['COUNT(`user_id`)']
 
+def get_unblocked_chats_count():
+    with DataConn(db) as conn:
+        curs = conn.cursor()
+        sql = 'SELECT COUNT(`chat_id`) FROM `chats` WHERE `is_blocked` = 1'
+        curs.execute(sql)
+        res = curs.fetchone()
+        return res['COUNT(`chat_id`)']
+        
+def get_unblocked_users_count():
+    with DataConn(db) as conn:
+        curs = conn.cursor()
+        sql = 'SELECT COUNT(`user_id`) FROM `users` WHERE `is_blocked` = 0'
+        curs.execute(sql)
+        res = curs.fetchone()
+        return res['COUNT(`user_id`)']
+        
 def get_chats_count():
     """
     Возвращает количество чатов в базе\n
     """
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT COUNT(`chat_id`) FROM `chats`'
-        cursor.execute(sql)
-        res = cursor.fetchone()
+        curs.execute(sql)
+        res = curs.fetchone()
         return res['COUNT(`chat_id`)']
 
 def get_user_param(user_id, column):
@@ -247,61 +315,56 @@ def get_user_param(user_id, column):
     :param column:
     """
     with DataConn(db) as conn:
-        cursor = conn.cursor()
-        sql = 'SELECT `{column}` FROM `user_settings` WHERE `user_id` = %s'.format(
+        curs = conn.cursor()
+        sql = 'SELECT * FROM `users` WHERE `user_id` = %s'.format(
             column = column
         )
-        sql = sql
-        cursor.execute(sql, (user_id, ))
-        res = cursor.fetchone()
-        return res[column]
-
-def get_user_params(user_id):
-    with DataConn(db) as conn:
-        cursor = conn.cursor()
-        sql = 'SELECT `settings` FROM `users` WHERE `user_id` = %s'
-        cursor.execute(sql, (user_id, ))
-        res = cursor.fetchone()
-        return res
-
-def set_user_param(user_id, column, state):
-    with DataConn(db) as conn:
-        cursor = conn.cursor()
-        sql = 'UPDATE `user_settings` SET `{column}` = %s WHERE `user_id` = %s'.format(
-            column = column
-        )
-        cursor.execute(sql, (state, user_id))
-        conn.commit()
+        curs.execute(sql, (user_id, ))
+        res = curs.fetchone()
+        try:
+            return res[column]
+        except Exception as e:
+            register_new_user(bot.get_chat_member(-1001236256304, user_id).user, 'ru')
+            change_user_param(user_id, 'settings', ujson.dumps(config.default_user_settings))
+            res['settings'] = ujson.dumps(default_user_settings)
+            return res[column]
+            
 
 def get_group_params(chat_id):
-    with DataConn(db) as conn:
-        cursor = conn.cursor()
-        sql = 'SELECT * FROM `chats` WHERE `chat_id` = %s'
-        cursor.execute(sql, (chat_id, ))
-        res = cursor.fetchone()
-        try:
-            ujson.loads(res['settings'])['get_notifications']
-            return ujson.loads(res['settings'])
-        except Exception as e:
-            register_new_chat(bot.get_chat(chat_id))
-            change_group_params(chat_id, ujson.dumps(config.default_group_settings))
-            bot.send_message(
-                chat_id,
-                text.group_commands['ru']['errors']['db_error']['got_error']
-            )
-            bot.send_message(   
-                chat_id,
-                text.group_commands['ru']['errors']['db_error']['finshed']
-            )
-            return ujson.loads(res['settings'])['get_notifications']
-
+    res = cache_worker.group_info_search_in_cache(chat_id)
+    if not res['result']:
+        with DataConn(db) as conn:
+            curs = conn.cursor()
+            sql = 'SELECT * FROM `chats` WHERE `chat_id` = %s'
+            curs.execute(sql, (chat_id, ))
+            res = curs.fetchone()
+            try:
+                ujson.loads(res['settings'])['get_notifications']
+                cache_worker.group_info_update_cache(chat_id, res['settings'])
+                return ujson.loads(res['settings'])
+            except Exception as e:
+                register_new_chat(bot.get_chat(chat_id))
+                change_group_params(chat_id, ujson.dumps(config.default_group_settings))
+                bot.send_message(
+                    chat_id,
+                    text.group_commands['ru']['errors']['db_error']['got_error']
+                )
+                bot.send_message(   
+                    chat_id,
+                    text.group_commands['ru']['errors']['db_error']['finshed']
+                )
+                return ujson.loads(res['settings'])['get_notifications']
+    else:
+        return ujson.loads(res['text'])
+        
 def change_group_params(chat_id, new_params):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'UPDATE `chats` SET `settings` = %s WHERE `chat_id` = %s'
         try:
-            cursor.execute(sql, (new_params, chat_id))
+            curs.execute(sql, (new_params, chat_id))
             conn.commit()
+            cache_worker.group_info_update_cache(chat_id, new_params)
         except Exception as e:
             print(e)
             print(sql)
@@ -309,10 +372,10 @@ def change_group_params(chat_id, new_params):
 
 def is_user_new(msg):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM users WHERE `user_id` = %s'
-        cursor.execute(sql, (msg.from_user.id, ))
-        r = cursor.fetchone()
+        curs.execute(sql, (msg.from_user.id, ))
+        r = curs.fetchone()
         if r is None:
             res = True
         else:
@@ -321,10 +384,10 @@ def is_user_new(msg):
 
 def check_sticker(sticker_id, chat_id):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `banned_stickers` WHERE `sticker_id` = %s AND `chat_id` = %s'
-        cursor.execute(sql, (sticker_id, chat_id))
-        r = cursor.fetchone()
+        curs.execute(sql, (sticker_id, chat_id))
+        r = curs.fetchone()
         if r is None:
             return False
         else:
@@ -332,14 +395,14 @@ def check_sticker(sticker_id, chat_id):
 
 def get_warns(user_id, chat_id):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `warns` WHERE `user_id` = %s AND `chat_id` = %s'
-        cursor.execute(sql, (user_id, chat_id))
-        res = cursor.fetchone()
+        curs.execute(sql, (user_id, chat_id))
+        res = curs.fetchone()
         if res is None:
             sql = 'INSERT INTO `warns`(`user_id`, `chat_id`, `warns`) VALUES (%s, %s, %s)'
             warns = 0
-            cursor.execute(sql, (user_id, chat_id, warns))
+            curs.execute(sql, (user_id, chat_id, warns))
             conn.commit()
         else:
             warns = int(res['warns'])
@@ -347,7 +410,7 @@ def get_warns(user_id, chat_id):
 
 def new_warn(user_id, chat_id):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         warns = get_warns(user_id, chat_id)
         warns += 1
         set_warns(user_id, chat_id, warns)
@@ -357,32 +420,32 @@ def zeroing_warns(user_id, chat_id):
 
 def set_warns(user_id, chat_id, warns):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'UPDATE `warns` SET `warns` = %s WHERE `user_id` = %s AND `chat_id` = %s'
-        cursor.execute(sql, (warns, user_id, chat_id))
+        curs.execute(sql, (warns, user_id, chat_id))
         conn.commit()
 
 def get_chats():
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `chats` ORDER BY `registration_time` ASC'
-        cursor.execute(sql)
-        res = cursor.fetchall()
+        curs.execute(sql)
+        res = curs.fetchall()
         return res
 
+def get_users():
+    with DataConn(db) as conn:
+        curs = conn.cursor()
+        sql = 'SELECT * FROM `users` ORDER BY `registration_time` ASC'
+        curs.execute(sql)
+        res = curs.fetchall()
+        return res
+        
 def get_all():
     all_chats = []
-    with DataConn(db) as conn:
-        cursor = conn.cursor()
-        sql = 'SELECT * FROM `chats` ORDER BY `registration_time` ASC'
-        cursor.execute(sql)
-        res = cursor.fetchall()
-        all_chats.extend(res)
-        sql = 'SELECT * FROM `users` ORDER BY `registration_time` ASC'
-        cursor.execute(sql)
-        res = cursor.fetchall()
-        all_chats.extend(res)
-        return all_chats
+    all_chats.extend(get_chats())
+    all_chats.extend(get_users())
+    return all_chats
 
 def replacerr(text):
     text_list = list(text) 
@@ -403,24 +466,24 @@ def escape_string(value):
 
 def update_stats_bot(count):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'INSERT INTO `stats` (`amount`, `check_time`) VALUES (%s, %s)'
-        cursor.execute(sql, (count, int(time.time())))
+        curs.execute(sql, (count, int(time.time())))
         conn.commit()
 
 def delete_pending():
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'DELETE * FROM `stats`'
-        cursor.execute(sql)
+        curs.execute(sql)
         conn.commit()
 
 def check_global_ban(user_id):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `global_bans` WHERE `user_id` = %s'
-        cursor.execute(sql, (user_id, ))
-        res = cursor.fetchone()
+        curs.execute(sql, (user_id, ))
+        res = curs.fetchone()
         if res is None:
             return False
         else:
@@ -429,26 +492,26 @@ def check_global_ban(user_id):
 def global_ban(user_id):
     with DataConn(db) as conn:
         if not check_global_ban(user_id):
-            cursor = conn.cursor()
+            curs = conn.cursor()
             sql = 'INSERT INTO `global_bans` (`user_id`) VALUES  (%s)'
-            cursor.execute(sql, (user_id, ))
+            curs.execute(sql, (user_id, ))
             conn.commit()
 
 def global_unban(user_id):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'DELETE FROM `global_bans` WHERE `user_id` = %s'
-        cursor.execute(sql, (user_id, ))
+        curs.execute(sql, (user_id, ))
         conn.commit()
 
 def new_update(msg, end_time):
     user_id = msg.from_user.id
     chat_id = msg.chat.id
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'INSERT INTO `proceeded_updates` (`user_id`, `chat_id`, `msg_time`, `used_time`, `proceeded_at`) VALUES (%s, %s, %s, %s, %s)'
         try:
-            cursor.execute(sql, (user_id, chat_id, msg.date, end_time*1000, int(time.time())))
+            curs.execute(sql, (user_id, chat_id, msg.date, end_time*1000, int(time.time())))
             conn.commit()
         except Exception as e:
             logging.error(e)
@@ -471,41 +534,41 @@ def update_user_stats(msg):
     chat_name = msg.chat.title
     user_name = msg.from_user.first_name
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         current_updates = get_user_messages_count(user_id, chat_id)
         sql = 'SELECT * FROM `most_active_users` WHERE `user_id` = %s AND `chat_id` = %s'
-        cursor.execute(sql, (user_id, chat_id))
-        res = cursor.fetchone()
+        curs.execute(sql, (user_id, chat_id))
+        res = curs.fetchone()
         if res is None:
             sql = 'INSERT INTO `most_active_users` (`user_id`, `user_name`, `chat_id`, `chat_name`, `amount`) VALUES (%s, %s, %s, %s, %s)'
-            cursor.execute(sql, (user_id, user_name, chat_id, chat_name, current_updates))
+            curs.execute(sql, (user_id, user_name, chat_id, chat_name, current_updates))
             conn.commit()
         else:
             sql = 'UPDATE `most_active_users` SET `user_name` = %s, `amount` = %s WHERE `user_id` = %s AND `chat_id` = %s'
-            cursor.execute(sql, (user_name, current_updates, user_id, chat_id))
+            curs.execute(sql, (user_name, current_updates, user_id, chat_id))
             sql = 'UPDATE `most_active_users` SET `chat_name` = %s WHERE `chat_id` = %s'
-            cursor.execute(sql, (chat_name, chat_id))
+            curs.execute(sql, (chat_name, chat_id))
             conn.commit()
         
 
 def get_user_messages_count(user_id, chat_id):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT `amount` FROM `most_active_users` WHERE `chat_id` = %s AND `user_id` = %s'
-        cursor.execute(sql, (chat_id, user_id))
-        res = cursor.fetchone()
+        curs.execute(sql, (chat_id, user_id))
+        res = curs.fetchone()
         return res['amount']
 
 def update_chat_stats(msg):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         current_updates = get_chat_updates_count(msg.chat.id)
         sql = 'SELECT * FROM `most_popular_chats` WHERE `chat_id` = %s'
-        cursor.execute(sql, (msg.chat.id, ))
-        res = cursor.fetchone()
+        curs.execute(sql, (msg.chat.id, ))
+        res = curs.fetchone()
         if res is None:
             sql = 'INSERT INTO `most_popular_chats` (`updates_count`, `chat_id`, `chat_name`, `last_update`) VALUES (%s, %s, %s, %s)'
-            cursor.execute(sql, (current_updates, msg.chat.id, msg.chat.title, msg.date))
+            curs.execute(sql, (current_updates, msg.chat.id, msg.chat.title, msg.date))
             try:
                 conn.commit()
             except Exception as e:
@@ -513,7 +576,7 @@ def update_chat_stats(msg):
                 logging.error(sql)
         else:
             sql = 'UPDATE `most_popular_chats` SET `updates_count` = %s, `chat_name` = %s, `last_update` = %s WHERE `chat_id` = %s'
-            cursor.execute(sql, (current_updates, msg.chat.title, msg.date, msg.chat.id))
+            curs.execute(sql, (current_updates, msg.chat.title, msg.date, msg.chat.id))
             try:
                 conn.commit()
             except Exception as e:
@@ -522,10 +585,10 @@ def update_chat_stats(msg):
 
 def get_chat_updates_count(chat_id):    
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT `updates_count` FROM `most_popular_chats` WHERE `chat_id` = %s'
-        cursor.execute(sql, (chat_id, ))
-        res = cursor.fetchone()
+        curs.execute(sql, (chat_id, ))
+        res = curs.fetchone()
         return int(res['updates_count'])
 
 def get_file_size(msg):
@@ -569,28 +632,19 @@ def new_message(msg, end_time):
     user_id = msg.from_user.id
     chat_id = msg.chat.id
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'INSERT INTO `proceeded_messages` (`user_id`, `chat_id`, `msg_time`, `used_time`, `proceeded_at`, `content_type`) VALUES (%s, %s, %s, %s, %s, %s)'
-        cursor.execute(sql, (user_id, chat_id, msg.date, end_time*1000, int(time.time()), msg.content_type))
-        conn.commit()
-
-def new_member(msg):
-    with DataConn(db) as conn:
-        cursor = conn.cursor()
-        sql = 'INSERT INTO `new_chat_members` (`user_id`, `chat_id`, `joined_chat_at`) VALUES (%s, %s, %s)'
-        cursor.execute(sql, (msg.new_chat_member.id, msg.chat.id, msg.date))
+        curs.execute(sql, (user_id, chat_id, msg.date, end_time*1000, int(time.time()), msg.content_type))
         conn.commit()
 
 def new_content(msg, end_time):
     new_message(msg, end_time)
-    if msg.content_type == 'new_chat_members':
-        new_member(msg)
-    elif msg.content_type == 'text':
+    if msg.content_type == 'text':
         try:
             with DataConn(db) as conn:
-                cursor = conn.cursor()
+                curs = conn.cursor()
                 sql = 'INSERT INTO `text` (`user_id`, `chat_id`, `text`, `msg_date`, `message_id`) VALUES (%s, %s, %s, %s, %s)'
-                cursor.execute(sql, (msg.from_user.id, msg.chat.id, msg.text, msg.date, msg.message_id))
+                curs.execute(sql, (msg.from_user.id, msg.chat.id, msg.text, msg.date, msg.message_id))
                 conn.commit()
         except Exception as e:
             logging.error(e)
@@ -598,11 +652,11 @@ def new_content(msg, end_time):
     else:
         try:
             with DataConn(db) as conn:
-                cursor = conn.cursor()
+                curs = conn.cursor()
                 sql = 'INSERT INTO `{cont_type}` (`user_id`, `chat_id`, `file_id`, `file_size`) VALUES (%s, %s, %s, %s)'.format(
                     cont_type = msg.content_type
                 )
-                cursor.execute(sql, (msg.from_user.id, msg.chat.id, get_file_id(msg), get_file_size(msg)))
+                curs.execute(sql, (msg.from_user.id, msg.chat.id, get_file_id(msg), get_file_size(msg)))
                 conn.commit()
         except Exception as e:
             logging.error(e)
@@ -610,30 +664,30 @@ def new_content(msg, end_time):
 
 def get_chat_users(chat_id, limit):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `most_active_users` WHERE `chat_id` = %s ORDER BY `amount` DESC LIMIT {limit}'.format(limit = limit)
-        cursor.execute(sql, (chat_id, ))
-        r = cursor.fetchall()
+        curs.execute(sql, (chat_id, ))
+        r = curs.fetchall()
         return r
 
 def get_chat_users_count(chat_id):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT COUNT(`user_id`) FROM `most_active_users` WHERE `chat_id` = %s ORDER BY `amount` DESC'
-        cursor.execute(sql, (chat_id, ))
-        r = cursor.fetchone()
+        curs.execute(sql, (chat_id, ))
+        r = curs.fetchone()
         return r['COUNT(`user_id`)']
 
 def new_voteban(chat_id, chat_name, victim_id, victim_name, vote_hash):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'INSERT INTO `votebans`(`vote_hash`, `victim_id`, `victim_name`, `chat_id`, `chat_name`, `votes_count`, `votes_limit`, `started_at`) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
-        cursor.execute(sql, (vote_hash, victim_id, victim_name, chat_id, chat_name, 0, utils.get_voteban_limit(chat_id), int(time.time())))
+        curs.execute(sql, (vote_hash, victim_id, victim_name, chat_id, chat_name, 0, utils.get_voteban_limit(chat_id), int(time.time())))
         conn.commit()
 
 def update_voteban(vote_hash):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         curr_votes = get_voteban_votes_count(vote_hash)
         utils.set_voteban_votes_count(vote_hash, curr_votes)
         if utils.get_voteban_limit():
@@ -641,30 +695,30 @@ def update_voteban(vote_hash):
 
 def get_voteban_votes_count(vote_hash):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT COUNT(`vote_id`) FROM `voteban` WHERE `vote_id` = %s'
-        cursor.execute(sql, (vote_hash, ))
-        r = cursor.fetchone()
+        curs.execute(sql, (vote_hash, ))
+        r = curs.fetchone()
         return r['COUNT(`vote_id`)']
 
 def set_voteban_votes_count(vote_hash, votes_count):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'UPDATE `votebans SET `votes_count` = %s WHERE `vote_hash` = %s'
-        cursor.execute(sql, (votes_count, vote_hash))
+        curs.execute(sql, (votes_count, vote_hash))
         conn.commit()
 
 def get_voteban_info(vote_hash):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'SELECT * FROM `votebans` WHERE `vote_hash` = %s'
-        cursor.execute(sql, (vote_hash, ))
-        r = cursor.fetchone()
+        curs.execute(sql, (vote_hash, ))
+        r = curs.fetchone()
         return r
 
 def set_voteban_info(column, state, vote_hash):
     with DataConn(db) as conn:
-        cursor = conn.cursor()
+        curs = conn.cursor()
         sql = 'UPDATE `votebans` SET `{column}` = %s WHERE `vote_hash` = %s'.format(column = column)
-        cursor.execute(state, vote_hash)
+        curs.execute(state, vote_hash)
         conn.commit()

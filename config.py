@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import ujson
-
 restricted_characters = [
     '<',
     '>',
@@ -46,16 +44,25 @@ restricted_characters_replace = {
     '&': '&amp;'
 }
 
-languages = {
+languages = [
+    {'title': '🇷🇺 Русский', 'code': 'ru'},
+    {'title': '🇬🇧 English', 'code': 'en'},
+    {'title': '🇺🇿 O\'zbek', 'code': 'uz'},
+    {'title': '🇺🇦 Українська', 'code': 'ukr'},
+]
+
+human_langs = {
     'ru' : '🇷🇺 Русский',
-    'en' : '🇺🇸 English',
-    'uz' : "🇺🇿 O'zbek"
+    'en' : '🇬🇧 English',
+    'uz' : '🇺🇿 O\'zbek',
+    'ukr': '🇺🇦 Українська'
 }
 
 default_group_settings = {
     'language': 'ru',
     'get_notifications': True,
     'restrict_new': False,
+    'additional_admins': [],
     'greeting': {
         'is_enabled': True,
         'text': 'Добро пожаловать в чат {chat_title}, <a href="tg://user?id={new_user_id}">{new_user_firstname}</a>',
@@ -90,7 +97,7 @@ default_group_settings = {
     },
     'captcha': {
         'is_on': False,
-
+		'type': 'math'
     },
     'warns': {
         'count': 3,
@@ -118,8 +125,9 @@ new_users = {
 }
 
 default_user_settings = {
-    'language': 'no_language_set',
-    'get_notifications': True
+    'language': 'ru',
+    'get_notifications': True,
+    'admined_groups': []
 }
 
 settings_statuses = {
@@ -135,3 +143,4 @@ settings_states = {
 available_commands = [
     '/'
 ]
+
