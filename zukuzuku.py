@@ -636,11 +636,7 @@ def bot_sticker_unban(msg):
     if utils.have_args(msg) and utils.check_status(msg.from_user.id, msg.chat.id):
         sticker_id = utils.parse_arg(msg)[1]
         utils.unban_sticker(msg, sticker_id)
-<<<<<<< HEAD
     elif utils.check_status(msg.from_user.id, msg.chat.id) and not utils.have_args(msg):
-=======
-    elif utils.check_status(msg) and not utils.have_args(msg):
->>>>>>> 74e3a9ba7167fc9be8d3b7b6ef96245e215380bb
         utils.not_enought_rights(msg)
     elif utils.have_args(msg) and not check_status(msg.from_user.id):
         utils.no_args(msg)

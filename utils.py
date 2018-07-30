@@ -94,11 +94,7 @@ def is_user_new(msg):
     return r
 
 def check_super_user(user_id):
-<<<<<<< HEAD
     if user_id in secret_config.super_admins:
-=======
-    if user_id in config.super_admins:
->>>>>>> 74e3a9ba7167fc9be8d3b7b6ef96245e215380bb
         return True
     else:
         return False
@@ -861,11 +857,7 @@ def get_my_ip():
     return s
 
 def get_text_translation(txt, end_lang):
-<<<<<<< HEAD
     res = cache_worker.translation_search_in_cache(txt, end_lang)
-=======
-    res = search_in_cache(txt, end_lang)
->>>>>>> 74e3a9ba7167fc9be8d3b7b6ef96245e215380bb
     if not res['result']:
         proxies = {
             'https': 'https://66.70.255.195:3128'
@@ -878,11 +870,7 @@ def get_text_translation(txt, end_lang):
             }
             r = requests.get(url = 'https://translate.yandex.net/api/v1.5/tr.json/translate', params = params, proxies = proxies).json()
             if r['code'] == 200:
-<<<<<<< HEAD
                 cache_worker.translation_add_to_cache(txt, r['text'][0], end_lang)
-=======
-                add_to_cache(txt, r['text'][0], end_lang)
->>>>>>> 74e3a9ba7167fc9be8d3b7b6ef96245e215380bb
                 return r['text'][0]
             else:
                 print(e)
@@ -890,24 +878,6 @@ def get_text_translation(txt, end_lang):
     else:
         return res['text']
 
-<<<<<<< HEAD
-
-=======
-def search_in_cache(txt, end_lang):
-    res = {
-        'result': False,
-        'text': ''
-    }
-    try:
-        res['text'] = config.translations[end_lang][txt]
-        res['result'] = True
-    except Exception:
-        pass
-    return res
-    
-def add_to_cache(source, txt, end_lang):
-    config.translations[end_lang][source] = txt
->>>>>>> 74e3a9ba7167fc9be8d3b7b6ef96245e215380bb
 
 ############################################################
 ############################################################
