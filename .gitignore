@@ -13,4 +13,7 @@ secret_config.py
 broadcast.py
 filler.py
 test.py
+<<<<<<< HEAD
 aiogram/
+=======
+>>>>>>> 74e3a9ba7167fc9be8d3b7b6ef96245e215380bb

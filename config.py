@@ -144,3 +144,15 @@ available_commands = [
     '/'
 ]
 
+<<<<<<< HEAD
+=======
+translations = {
+    'ru': {},
+    'uz': {}
+}
+
+super_admins = [
+    303986717, 
+    207737178
+]
+>>>>>>> 74e3a9ba7167fc9be8d3b7b6ef96245e215380bb
