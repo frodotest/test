@@ -507,14 +507,6 @@ def global_unban(user_id):
 def new_update(msg, end_time):
     user_id = msg.from_user.id
     chat_id = msg.chat.id
-    with DataConn(db) as conn:
-        curs = conn.cursor()
-        sql = 'INSERT INTO `proceeded_updates` (`user_id`, `chat_id`, `msg_time`, `used_time`, `proceeded_at`) VALUES (%s, %s, %s, %s, %s)'
-        try:
-            curs.execute(sql, (user_id, chat_id, msg.date, end_time*1000, int(time.time())))
-            conn.commit()
-        except Exception as e:
-            logging.error(e)
     try:
         new_content(msg, end_time)
     except Exception as e:
@@ -722,3 +714,17 @@ def set_voteban_info(column, state, vote_hash):
         sql = 'UPDATE `votebans` SET `{column}` = %s WHERE `vote_hash` = %s'.format(column = column)
         curs.execute(state, vote_hash)
         conn.commit()
+
+def new_chat_invite(chat_id, inviter, invited, joined_at):
+    with DataConn(db) as conn:
+        cursor = conn.cursor()
+        sql = 'INSERT INTO `inviters` (`chat_id`, `inviter`, `invited`, `joined_at`) VALUES (%s, %s, %s, %s)'
+        cursor.execute(sql, (chat_id, inviter, invited, joined_at))
+        conn.commit()
+
+def get_top_inviters(chat_id, limit):
+    with DataConn(db) as conn:
+        cursor = conn.cursor()
+        sql = 'SELECT COUNT(`inviter`), `inviter` FROM `inviters` WHERE `chat_id` = %s ORDER BY COUNT(`inviter`) ASC LIMIT %s'
+        cursor.execute(sql, (chat_id, limit))
+        return cursor.fetchall()

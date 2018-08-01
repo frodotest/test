@@ -78,15 +78,20 @@ def notify_new_chat(chat_obj):
     )
 
 def get_user_lang(msg):
-    r = ujson.loads(api.get_user_param(msg.chat.id, 'settings'))['language']
+    r = ujson.loads(api.get_user_param(msg.from_user.id, 'settings'))['language']
+    if r not in config.human_langs.keys():
+        settings = ujson.loads(api.get_user_param(msg.from_user.id, 'settings'))
+        settings['language'] = 'ru'
+        api.change_user_param(msg.from_user.id, 'settings', ujson.dumps(settings))
+        return 'ru'
     return r
 
 def is_new_in_chat(msg):
     pass
     
 
-def get_group_lang(msg):
-    r = api.get_group_params(msg.chat.id)
+def get_group_lang(chat_id):
+    r = api.get_group_params(chat_id)
     return r['language']
 
 def is_user_new(msg):
@@ -171,7 +176,7 @@ def unban_sticker(msg, sticker_id):
     if not r:
         bot.send_message(
             msg.chat.id,
-            text.group_commands[get_group_lang(msg)]['errors']['no_such_sticker']
+            text.group_commands[get_group_lang(msg.chat.id)]['errors']['no_such_sticker']
         )
 
 def ban_stickerpack(msg, sticker):
@@ -182,7 +187,7 @@ def ban_stickerpack(msg, sticker):
             ban_sticker(msg, i.file_id)
         bot.send_message(
             msg.chat.id,
-            text.group_commands[get_group_lang(msg)]['stickers']['pack_banned'].format(
+            text.group_commands[get_group_lang(msg.chat.id)]['stickers']['pack_banned'].format(
                 stickerpack_name = stickerpack_name,
                 count = len(stickerpack.stickers)
             ),
@@ -198,7 +203,7 @@ def unban_stickerpack(msg, stickerpack_name):
             unban_sticker(msg, i.file_id)
         bot.send_message(
             msg.chat.id,
-            text.group_commands[get_group_lang(msg)]['stickers']['pack_unbanned'].format(
+            text.group_commands[get_group_lang(msg.chat.id)]['stickers']['pack_unbanned'].format(
                 stickerpack_name = stickerpack_name
             ),
             parse_mode='HTML'
@@ -321,7 +326,7 @@ def ban_user(msg):
             until_date = str(time.time() + 31708800))
         bot.reply_to(
             msg, 
-            text.group_commands[get_group_lang(msg)]['users']['banned'].format(
+            text.group_commands[get_group_lang(msg.chat.id)]['users']['banned'].format(
                 user_name = api.replacer(msg.reply_to_message.from_user.first_name),
                 user_id = msg.reply_to_message.from_user.id,
                 admin_name = api.replacer(msg.from_user.first_name),
@@ -344,7 +349,7 @@ def kick_user(msg):
             bot.unban_chat_member(msg.chat.id, msg.reply_to_message.from_user.id)
             bot.reply_to(
                 msg, 
-                text.group_commands[get_group_lang(msg)]['users']['kick'].format(
+                text.group_commands[get_group_lang(msg.chat.id)]['users']['kick'].format(
                     user_name = api.replacer(msg.reply_to_message.from_user.first_name),
                     user_id = msg.reply_to_message.from_user.id,
                     admin_name = api.replacer(msg.from_user.first_name),
@@ -365,7 +370,7 @@ def kick_user(msg):
             bot.unban_chat_member(msg.chat.id, usr.user.id)
             bot.reply_to(
                 msg, 
-                text.group_commands[get_group_lang(msg)]['users']['kick'].format(
+                text.group_commands[get_group_lang(msg.chat.id)]['users']['kick'].format(
                     user_name = api.replacer(usr.user.first_name),
                     user_id = usr.user.id,
                     admin_name = api.replacer(msg.from_user.first_name),
@@ -439,7 +444,7 @@ def unban_user(msg, user_id):
         )
         bot.send_message(
             msg.chat.id,
-            text.group_commands[get_group_lang(msg)]['users']['unbanned'].format(
+            text.group_commands[get_group_lang(msg.chat.id)]['users']['unbanned'].format(
                 user_id = user.user.id,
                 user_name = api.replacer(user.user.first_name),
                 admin_id = msg.from_user.id,
@@ -450,7 +455,7 @@ def unban_user(msg, user_id):
     else:
         bot.send_message(
             msg.chat.id,
-            text.group_commands[get_group_lang(msg)]['errors']['not_restricted']
+            text.group_commands[get_group_lang(msg.chat.id)]['errors']['not_restricted']
         )
 
 def unban_user_button(c):
@@ -472,7 +477,7 @@ def unban_user_button(c):
     else:
         bot.send_message(
             chat_id,
-            text.group_commands[get_group_lang(c.message)]['errors']['not_restricted'],
+            text.group_commands[get_group_lang(c.message.chat.id)]['errors']['not_restricted'],
             parse_mode = 'HTML'
         )
 
@@ -492,7 +497,7 @@ def new_warn(msg):
     max_warns = int(api.get_group_params(msg.chat.id)['warns']['count'])
     bot.send_message(
         msg.chat.id,
-        text.group_commands[get_group_lang(msg)]['users']['warn'].format(
+        text.group_commands[get_group_lang(msg.chat.id)]['users']['warn'].format(
             user_id = user_id,
             user_name = api.replacer(msg.reply_to_message.from_user.first_name),
             current_warns = curr,
@@ -662,7 +667,7 @@ def send_file(chat_id, content_type, file_id, caption):
             
 def new_update(msg, end_time):
     try:
-        #api.new_update(msg, end_time)
+        api.new_update(msg, end_time)
         pass
     except Exception as e:
         logging.error(e)
@@ -710,7 +715,7 @@ def kick_user_warns(msg, max_warns):
         )
     bot.send_message(
         msg.chat.id,
-        text.group_commands[get_group_lang(msg)]['users']['kicked_warns'].format(
+        text.group_commands[get_group_lang(msg.chat.id)]['users']['kicked_warns'].format(
             user_id = msg.reply_to_message.from_user.id,
             user_name = api.replacer(msg.reply_to_message.from_user.first_name),
             count_warns = max_warns
@@ -726,7 +731,7 @@ def ban_user_warns(msg, max_warns):
         )
     bot.send_message(
         msg.chat.id,
-        text.group_commands[get_group_lang(msg)]['users']['kicked_warns'].format(
+        text.group_commands[get_group_lang(msg.chat.id)]['users']['kicked_warns'].format(
             user_id = msg.reply_to_message.from_user.id,
             user_name = api.replacer(msg.reply_to_message.from_user.first_name),
             count_warns = max_warns
@@ -742,7 +747,7 @@ def ro_user_warns(msg, max_warns):
         )
     bot.send_message(
         msg.chat.id,
-        text.group_commands[get_group_lang(msg)]['users']['ro_warns'].format(
+        text.group_commands[get_group_lang(msg.chat.id)]['users']['ro_warns'].format(
             user_id = msg.reply_to_message.from_user.id,
             user_name = api.replacer(msg.reply_to_message.from_user.first_name),
             count_warns = max_warns
@@ -878,6 +883,21 @@ def get_text_translation(txt, end_lang):
     else:
         return res['text']
 
+def new_user_in_chat(msg):
+    chat_id = msg.chat.id
+    new_user = msg.new_chat_member.id
+    inviter = None
+    if msg.from_user.id is not None:
+        inviter = msg.from_user.id
+    if inviter and inviter != new_user:
+        try:
+            api.new_chat_invite(chat_id, inviter, new_user, msg.date)
+        except Exception as e:
+            print(e)
+
+def get_top_inviters(chat_id):
+    return api.get_top_inviters(chat_id, 10)
+
 
 ############################################################
 ############################################################
@@ -891,7 +911,7 @@ def get_text_translation(txt, end_lang):
 def not_enought_rights(msg):
     r = bot.send_message(
         msg.chat.id,
-        text.group_commands[get_group_lang(msg)]['errors']['not_enough_rights'],
+        text.group_commands[get_group_lang(msg.chat.id)]['errors']['not_enough_rights'],
         parse_mode='HTML'
     )
     bot.delete_message(
@@ -904,7 +924,7 @@ def not_enought_rights(msg):
 def no_args(msg):
     r = bot.send_message(
         msg.chat.id,
-        text.group_commands[get_group_lang(msg)]['errors']['no_args_provided'],
+        text.group_commands[get_group_lang(msg.chat.id)]['errors']['no_args_provided'],
         parse_mode='HTML'
     )
     t = Timer(15, delete_msg, (chat_id, c.message.message_id))

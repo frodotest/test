@@ -101,6 +101,8 @@ def group_setting(chat_id):
     keyboard.add(btn)
     btn = types.InlineKeyboardButton(text = 'Получить дамп настроек', callback_data = 'get_settings_json::{chat_id}'.format(chat_id = chat_id))
     keyboard.add(btn)
+    btn = types.InlineKeyboardButton(text = 'Получить топ инвайтеров', callback_data = 'get_chat_refs::{chat_id}'.format(chat_id = chat_id))
+    keyboard.add(btn) 
     keyboard.add(types.InlineKeyboardButton(text = 'К списку групп', callback_data = 'to_groups_list'))
     return keyboard
 
@@ -276,7 +278,7 @@ def bot_broadcast(msg):
 def bot_leave(msg):
     bot.send_message(
         msg.chat.id,
-        text.group_commands[utils.get_group_lang(msg)]['leave']['question'],
+        text.group_commands[utils.get_group_lang(msg.chat.id)]['leave']['question'],
         reply_markup = generate_leave_kb(msg),
         parse_mode = 'HTML'
     )  
@@ -377,7 +379,7 @@ def bot_ban_me_please(msg):
                     msg.chat.id,
                     msg.from_user.id,
                     until_date=str(time.time() + ban_time))
-                bot.send_message(msg.chat.id, text.group_commands[utils.get_group_lang(msg)]['ban_me_please'].format(
+                bot.send_message(msg.chat.id, text.group_commands[utils.get_group_lang(msg.chat.id)]['ban_me_please'].format(
                     user_id = msg.from_user.id,
                     user_name = api.replacer(msg.from_user.first_name),
                     t = t
@@ -387,8 +389,8 @@ def bot_ban_me_please(msg):
             else:
                 bot.send_message(
                     msg.chat.id,
-                    text.group_commands[utils.get_group_lang(msg)]['errors']['prefix'].format(
-                        reason = text.group_commands[utils.get_group_lang(msg)]['errors']['reasons']['user_is_admin']
+                    text.group_commands[utils.get_group_lang(msg.chat.id)]['errors']['prefix'].format(
+                        reason = text.group_commands[utils.get_group_lang(msg.chat.id)]['errors']['reasons']['user_is_admin']
                     ),
                     parse_mode='HTML'
                 )
@@ -496,6 +498,7 @@ def bot_users_new(msg):
                 parse_mode = 'HTML'
             )
         else:
+            utils.new_user_in_chat(msg)
             if utils.need_greeting(msg):
                 r = bot.send_message(
                     msg.chat.id,
@@ -589,7 +592,7 @@ def bot_reregister(msg):
         api.change_group_params(msg.chat.id, ujson.dumps(config.default_group_settings))
     bot.send_message(
         msg.chat.id,
-        text.group_commands[utils.get_group_lang(msg)]['registration'],
+        text.group_commands[utils.get_group_lang(msg.chat.id)]['registration'],
         parse_mode = 'HTML'
     )
 
@@ -784,7 +787,7 @@ def bot_check_text(msg):
                     )
                     bot.send_message(
                         msg.chat.id,
-                        text.group_commands[utils.get_group_lang(msg)]['restricted']['url'].format(
+                        text.group_commands[utils.get_group_lang(msg.chat.id)]['restricted']['url'].format(
                             user_id = msg.from_user.id,
                             user_name = api.replacer(msg.from_user.first_name)
                         ),
@@ -797,7 +800,7 @@ def bot_check_text(msg):
                 #     )
                 #     bot.send_message(
                 #         msg.chat.id,
-                #         text.group_commands[utils.get_group_lang(msg)]['restricted']['url'].format(
+                #         text.group_commands[utils.get_group_lang(msg.chat.id)]['restricted']['url'].format(
                 #             user_id = msg.from_user.id,
                 #             user_name = api.replacer(msg.from_user.first_name)
                 #         ),
@@ -835,6 +838,33 @@ def testt(msg):
 
 # Кнопки
 
+@bot.callback_query_handler(func = lambda c: c.data.startswith('get_chat_refs::'))
+def bot_get_chat_refs(c):
+    chat_id = utils.parse_chat_id(c)
+    user_id = c.from_user.id
+    inviters = utils.get_top_inviters(chat_id)
+    m = text.group_commands[utils.get_group_lang(chat_id)]['refs_stats']['header']
+    counter = 0
+    for i in inviters:
+        inviter_info = bot.get_chat_member(chat_id, i['inviter'])
+        counter += 1
+        m += text.group_commands[utils.get_group_lang(chat_id)]['refs_stats']['body'].format(
+            inviter_pos = counter,
+            inviter_id = inviter_info.user.id,
+            inviter_firstname = inviter_info.user.first_name,
+            invited_count = int(i['COUNT(`inviter`)'])
+        )
+    bot.send_message(
+        user_id,
+        m,
+        parse_mode = 'HTML'
+    )
+    bot.answer_callback_query(
+        c.id,
+        text = 'Список отправлен',
+        show_alert = True
+    )
+
 @bot.callback_query_handler(func = lambda c: c.data in ['my_chats', 'to_groups_list'])
 def my_chats_list(c):
     user_id = c.from_user.id
@@ -860,6 +890,11 @@ def bot_get_settings_json(c):
     bot.send_message(
         chat_id = c.from_user.id,
         text = 'Эти настройки можно получить в любое время и отправить @f0rden для восстановления их, в случае сбоя:\n'+ujson.dumps(api.get_group_params(chat_id))
+    )
+    bot.answer_callback_query(
+        c.id,
+        text = 'Настройки отправлены',
+        show_alert = True
     )
     
 @bot.callback_query_handler(func = lambda c: c.data == 'stats_menu')
@@ -1313,7 +1348,7 @@ def unban_new_user(c):
                 user_id
             )
             bot.edit_message_text(
-                text = text.group_commands[utils.get_group_lang(c.message)]['restricted']['new_user']['button_pressed'].format(
+                text = text.group_commands[utils.get_group_lang(c.message.chat.id)]['restricted']['new_user']['button_pressed'].format(
                     user_id = user.user.id,
                     user_name = api.replacer(user.user.first_name)
                 ),
@@ -1345,7 +1380,7 @@ def unban_new_user(c):
                     can_send_other_messages=True
                 )
                 bot.edit_message_text(
-                    text = text.group_commands[utils.get_group_lang(c.message)]['restricted']['new_user']['button_pressed'].format(
+                    text = text.group_commands[utils.get_group_lang(c.message.chat.id)]['restricted']['new_user']['button_pressed'].format(
                         user_id = user.user.id,
                         user_name = api.replacer(user.user.first_name)
                     ),
@@ -1506,7 +1541,7 @@ def bot_leave_cb(c):
             )
             bot.send_message(
                 c.message.chat.id,
-                text.group_commands[utils.get_group_lang(c.message)]['leave']['accepted']
+                text.group_commands[utils.get_group_lang(c.message.chat.id)]['leave']['accepted']
             )
             bot.leave_chat(
                 c.message.chat.id
@@ -1514,7 +1549,7 @@ def bot_leave_cb(c):
         else:
             bot.send_message(
                 c.message.chat.id,
-                text.group_commands[utils.get_group_lang(c.message)]['leave']['cancelled']
+                text.group_commands[utils.get_group_lang(c.message.chat.id)]['leave']['cancelled']
             )
             bot.delete_message(
                 c.message.chat.id,

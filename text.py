@@ -210,7 +210,10 @@ group_commands = {
             'kicked_warns': 'Пользователь <a href="tg://user?id={user_id}">{user_name}</a> исключен за превышение допустимого числа предупреждений: <b>{count_warns}</b>',
             'ro_warns': 'Пользователь <a href="tg://user?id={user_id}">{user_name}</a> лишен права писать за превышение допустимого числа предупреждений: <b>{count_warns}</b>',
         },
-
+        'refs_stats': {
+            'header': 'Топ-10 пользователей чата по количеству приглашенных\n',
+            'body': '{inviter_pos}. <a href="tg://user?id={inviter_id}">{inviter_firstname}</a> - <b>{invited_count}</b> шт.'
+        },
         'donate': 'Ого, кто-то сюда зашел..\n'
                   'Ну, по такому поводу я могу предложить вам немного покормить разработчика любым из приведенных ниже способов:\n\n'
                   '<a href="https://money.yandex.ru/to/410012441742057">Яндекс.Деньги</a>: <code>410012441742057</code>\n'
