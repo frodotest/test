@@ -283,6 +283,24 @@ def bot_leave(msg):
         parse_mode = 'HTML'
     )  
 
+@bot.message_handler(commands = ['rmkb'], func = lambda msg: msg.chat.type in ['group', 'supergroup'])
+def bot_remove_kb(msg):
+    kb = types.ReplyKeyboardMarkup(one_time_keyboard=True)
+    kb.add(types.KeyboardButton(text='Не нажимать'))
+    r = bot.send_message(
+        msg.chat.id,
+        text = text.group_commands[utils.get_group_lang(msg.chat.id)]['remove_keyboard'],
+        reply_markup = kb
+    )
+    bot.delete_message(
+        msg.chat.id,
+        r.message_id
+    )
+    bot.delete_message(
+        msg.chat.id,
+        msg.message_id
+    )
+
 @bot.message_handler(commands = ['settings'], func = lambda msg: msg.chat.type == 'supergroup')
 def bot_answ(msg):
     start_time = time.time()

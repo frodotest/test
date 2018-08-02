@@ -205,8 +205,10 @@ def register_new_user(user_obj, lang):
             sec_name = 'None'
             logging.error(e)
         if res is None:
-            sql = 'INSERT INTO `users` (`user_id`, `registration_time`, `first_name`, `second_name`, `language`, `settings`) VALUES (%s, %s, %s, %s, %s, %s)'
-            curs.execute(sql, (user_obj.id, int(time.time()), user_obj.first_name, sec_name, lang, ujson.dumps(config.default_user_settings)))
+            sql = 'INSERT INTO `users` (`user_id`, `registration_time`, `first_name`, `second_name`, `settings`) VALUES (%s, %s, %s, %s, %s, %s)'
+            settings = config.default_user_settings
+            settings['language'] = lang
+            curs.execute(sql, (user_obj.id, int(time.time()), user_obj.first_name, sec_name, ujson.dumps(settings)))
             conn.commit()
             utils.notify_new_user(user_obj, lang)
         else:
