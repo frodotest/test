@@ -865,7 +865,7 @@ def get_text_translation(txt, end_lang):
     res = cache_worker.translation_search_in_cache(txt, end_lang)
     if not res['result']:
         proxies = {
-            'https': 'https://66.70.255.195:3128'
+            'https': 'https://91.121.208.196:3128'
         }
         while True:
             params = {
@@ -898,6 +898,90 @@ def new_user_in_chat(msg):
 def get_top_inviters(chat_id):
     return api.get_top_inviters(chat_id, 10)
 
+def get_user_state(user_id):
+    r = api.get_user_param(user_id, 'state')
+    return config.user_states[r]
+
+def set_user_state(user_id, state):
+    api.change_user_param(user_id, 'state', config.user_states_str_to_num[state])
+
+def add_to_delete_queue(chat_id, message_id, ttl):
+    deleted_at = int((datetime.datetime.now() + datetime.timedelta(seconds=ttl)).timestamp())
+    api.add_to_delete_queue(chat_id, message_id, deleted_at)
+
+def check_deleting_queue():
+    while True:
+        try:
+            messages_list = api.get_expired_messages()
+            for i in messages_list:
+                try:
+                    bot.delete_message(
+                        i['chat_id'],
+                        i['message_id']
+                    )
+                except Exception as e:
+                    pass
+            time.sleep(1)
+        except Exception as e:
+            print(e)
+            time.sleep(1)
+
+def set_log_channel(chat_id, channel_id):
+    try:
+        bot.send_message(
+            channel_id,
+            text = text.group_commands[get_group_lang(chat_id)]['log_channel']['confirmation']['channel']
+        )
+        api.add_log_channel(chat_id, channel_id)
+        bot.send_message(
+            chat_id,
+            text = text.group_commands[get_group_lang(chat_id)]['log_channel']['confirmation']['chat']
+        )
+    except Exception as e:
+        bot.send_message(
+            chat_id,
+            text = text.group_commands[get_group_lang(chat_id)]['log_channel']['confirmation']['errors']['bot_is_not_admin']
+        )
+
+def remove_log_channel(chat_id):
+    bot.send_message(
+        get_log_id(chat_id),
+        text = text.group_commands[get_group_lang(chat_id)]['log_channel']['deletion']['channel']
+    )
+    api.remove_log_channel(chat_id)
+    bot.send_message(
+        chat_id,
+        text = text.group_commands[get_group_lang(chat_id)]['log_channel']['deletion']['chat']
+    )
+    
+def check_log(chat_id):
+    return api.get_group_params(chat_id)['logs_channel']['is_on']
+
+def get_log_id(chat_id):
+    return api.get_group_params(chat_id)['logs_channel']['chat_id']
+
+def new_member_logs(msg):
+    new_user = msg.new_chat_member
+    if check_log(msg.chat.id):
+        log_id = get_log_id(msg.chat.id)
+        new_user_lastname = None
+        new_user_username = None
+        if new_user.last_name:
+            new_user_lastname = new_user.last_name
+        if new_user.username:
+            new_user_username = new_user.username
+        bot.send_message(
+            log_id,
+            text.group_commands[get_group_lang(msg.chat.id)]['log_channel']['new_chat_user'].format(
+                new_user_id = new_user.id,
+                new_user_firstname = new_user.first_name,
+                chat_name = msg.chat.title,
+                new_user_lastname = new_user_lastname,
+                new_user_username = new_user_username,
+                curr_date = datetime.datetime.fromtimestamp(msg.date)
+            ),
+            parse_mode = 'HTML'
+        )
 
 ############################################################
 ############################################################
@@ -908,24 +992,16 @@ def get_top_inviters(chat_id):
 #            #
 ############################################################
 
-def not_enought_rights(msg):
+def send_err_report(msg, reason):
     r = bot.send_message(
         msg.chat.id,
-        text.group_commands[get_group_lang(msg.chat.id)]['errors']['not_enough_rights'],
+        text.group_commands[get_group_lang(msg.chat.id)]['errors']['prefix'].format(
+            reason = text.group_commands[get_group_lang(msg.chat.id)]['errors']['reasons'][reason]
+        ),
         parse_mode='HTML'
     )
     bot.delete_message(
         msg.chat.id,
         msg.message_id
     )
-    t = Timer(15, delete_msg, (chat_id, c.message.message_id))
-    t.start()
-
-def no_args(msg):
-    r = bot.send_message(
-        msg.chat.id,
-        text.group_commands[get_group_lang(msg.chat.id)]['errors']['no_args_provided'],
-        parse_mode='HTML'
-    )
-    t = Timer(15, delete_msg, (chat_id, c.message.message_id))
-    t.start()
+    add_to_delete_queue(msg.chat.id, r.message_id, 15)

@@ -12,10 +12,9 @@ def translation_search_in_cache(txt, end_lang):
     try:
         res['text'] = cache_file.translations[end_lang][txt]
         res['result'] = True
+        print('used translation cache')
     except Exception:
         pass
-        print('used translation cache')
-
     return res
     
 def translation_add_to_cache(source, txt, end_lang):

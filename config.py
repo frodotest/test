@@ -144,3 +144,16 @@ available_commands = [
     '/'
 ]
 
+user_states_num_to_str = {
+    0: 'menu',
+    1: 'greeting',
+    2: 'rules',
+    3: 'log_channel'
+}
+
+user_states_str_to_num = {
+    'menu': 0,
+    'greeting': 1,
+    'rules': 2,
+    'log_channel': 3
+}

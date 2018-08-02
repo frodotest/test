@@ -8,10 +8,10 @@ import ssl
 import subprocess
 import threading
 import time
-from threading import Timer
 from multiprocessing import Process as Thread
 
 import telebot
+from aiohttp import web
 from telebot import types
 
 import api
@@ -21,7 +21,6 @@ import secret_config
 import text
 import ujson
 import utils
-from aiohttp import web
 
 WEBHOOK_HOST = utils.get_my_ip()
 WEBHOOK_PORT = 8443  # 443, 80, 88 или 8443 (порт должен быть открыт!)
@@ -36,8 +35,8 @@ WEBHOOK_URL_PATH = "/%s/" % (secret_config.token)
 
 start_time = int(time.time())
 
-bot = telebot.TeleBot(token = secret_config.token, threaded=True)
-
+bot = telebot.TeleBot(token = secret_config.token)
+my_info = bot.get_me()
 telebot_logger = logging.getLogger('telebot')
 sqlite_info = logging.getLogger('sqlite')
 main_info = logging.getLogger('main_info')
@@ -62,6 +61,9 @@ logging.basicConfig(
                     )
 
 app = web.Application()
+
+t = Thread(target = utils.check_deleting_queue)
+t.start()
 
 async def handle(request):
     if request.match_info.get('token') == bot.token:
@@ -271,8 +273,94 @@ def generate_user_groups(user_id):
     
 @bot.channel_post_handler(content_types=['text'], func = lambda msg: msg.chat.id == secret_config.channel_ID)
 def bot_broadcast(msg):
-    bot.forward_message(secret_config.adminID, msg.chat.id, msg.forward_from_message_id)
+    r = bot.forward_message(secret_config.official_chat, msg.chat.id, msg.message_id)
+    bot.pin_chat_message(
+        r.chat.id,
+        r.message_id
+    )
 
+@bot.message_handler(commands =['setlog'], func = lambda msg: 
+    msg.chat.type in ['group', 'supergroup'] and
+    msg.forward_from_chat is not None and
+    utils.check_status(msg.from_user.id, msg.chat.id) and
+    not utils.check_log(msg.chat.id)
+)
+def bot_set_log(msg):
+    user_id = msg.from_user.id
+    try:
+        admins = bot.get_chat_administrators(msg.forward_from_chat.id)
+        status1 = False
+        status2 = False
+        for i in admins:
+            if i.user.id == user_id:
+                if i.status == 'creator':
+                    status1 = True
+            if i.user.id == my_info.id:
+                status2 = True
+        if status1 is True and status2 is True:
+            utils.set_log_channel(msg.chat.id, msg.forward_from_chat.id)
+        elif status1 is not True:
+            bot.send_message(
+                msg.chat.id,
+                text = text.group_commands[utils.get_group_lang(chat_id)]['log_channel']['confirmation']['errors']['user_is_not_creator']
+            )
+        elif status2 is not True:
+            bot.send_message(
+                msg.chat.id,
+                text = text.group_commands[utils.get_group_lang(chat_id)]['log_channel']['confirmation']['errors']['bot_is_not_admin']
+            )
+    except Exception as e:
+        print(e)
+
+@bot.message_handler(commands = ['dellog'], func = lambda msg: 
+    msg.chat.type in ['group', 'supergroup'] and 
+    msg.forward_from_chat is not None and
+    utils.check_status(msg.from_user.id, msg.chat.id) and
+    msg.forward_from_chat.id == utils.get_log_id(msg.chat.id) and
+    utils.check_log(msg.chat.id)
+)
+def bot_del_log(msg):
+    print(1)
+    user_id = msg.from_user.id
+    try:
+        admins = bot.get_chat_administrators(msg.forward_from_chat.id)
+        status1 = False
+        status2 = False
+        for i in admins:
+            if i.user.id == user_id:
+                if i.status == 'creator':
+                    status1 = True
+            if i.user.id == my_info.id:
+                status2 = True
+        if status1 is True and status2 is True:
+            utils.remove_log_channel(msg.chat.id)
+        elif status1 is not True:
+            bot.send_message(
+                msg.chat.id,
+                text = text.group_commands[utils.get_group_lang(chat_id)]['log_channel']['confirmation']['errors']['user_is_not_creator']
+            )
+        elif status2 is not True:
+            bot.send_message(
+                msg.chat.id,
+                text = text.group_commands[utils.get_group_lang(chat_id)]['log_channel']['confirmation']['errors']['bot_is_not_admin']
+            )
+    except Exception as e:
+        print(e)
+
+@bot.message_handler(commands = ['infolog'], func = lambda msg: msg.chat.type in ['group', 'supergroup'])
+def bot_info_log(msg):
+    if utils.check_log(msg.chat.id):
+        m = text.group_commands[utils.get_group_lang(msg.chat.id)]['log_channel']['info']['is_on'].format(
+            chat_id = utils.get_log_id(msg.chat.id),
+            chat_name = bot.get_chat(utils.get_log_id(msg.chat.id)).title
+        )
+    else:
+        m = text.group_commands[utils.get_group_lang(msg.chat.id)]['log_channel']['info']['is_off']
+    bot.send_message(
+        msg.chat.id,
+        m,
+        parse_mode = 'HTML'
+    )
 
 @bot.message_handler(commands = ['leave'], func = lambda msg: msg.chat.type != 'private' and utils.check_status(msg.from_user.id, msg.chat.id))
 def bot_leave(msg):
@@ -286,7 +374,7 @@ def bot_leave(msg):
 @bot.message_handler(commands = ['rmkb'], func = lambda msg: msg.chat.type in ['group', 'supergroup'])
 def bot_remove_kb(msg):
     kb = types.ReplyKeyboardMarkup(one_time_keyboard=True)
-    kb.add(types.KeyboardButton(text='Не нажимать'))
+    kb.add(types.KeyboardButton(text='/rmkb'))
     r = bot.send_message(
         msg.chat.id,
         text = text.group_commands[utils.get_group_lang(msg.chat.id)]['remove_keyboard'],
@@ -335,11 +423,15 @@ def bot_user_start(msg):
         bot.send_message(
             msg.chat.id,
             text.user_messages['start'],
-            reply_markup=create_user_language_keyboard()
+            reply_markup=generate_user_menu_kb(msg.from_user.id)
             )
         api.register_new_user(msg.from_user, 'ru')
     else:
-        bot.send_message(msg.chat.id, text.user_messages[utils.get_user_lang(msg)]['start'])
+        bot.send_message(
+            msg.chat.id, 
+            text.user_messages[utils.get_user_lang(msg)]['start'], 
+            reply_markup=generate_user_menu_kb(msg.from_user.id)
+        )
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['start'], func=lambda msg: msg.chat.type != 'private')
@@ -397,16 +489,16 @@ def bot_ban_me_please(msg):
                     msg.chat.id,
                     msg.from_user.id,
                     until_date=str(time.time() + ban_time))
-                bot.send_message(msg.chat.id, text.group_commands[utils.get_group_lang(msg.chat.id)]['ban_me_please'].format(
-                    user_id = msg.from_user.id,
-                    user_name = api.replacer(msg.from_user.first_name),
-                    t = t
-                ), 
-                parse_mode = 'HTML'
-            )
+                bot.reply_to(
+                    msg, 
+                    text.group_commands[utils.get_group_lang(msg.chat.id)]['ban_me_please'].format(
+                        t = t
+                    ), 
+                    parse_mode = 'HTML'
+                )
             else:
-                bot.send_message(
-                    msg.chat.id,
+                bot.reply_to(
+                    msg,
                     text.group_commands[utils.get_group_lang(msg.chat.id)]['errors']['prefix'].format(
                         reason = text.group_commands[utils.get_group_lang(msg.chat.id)]['errors']['reasons']['user_is_admin']
                     ),
@@ -416,16 +508,6 @@ def bot_ban_me_please(msg):
             logging.error(e)
     else:
         utils.ban_user(msg)
-    utils.new_update(msg, time.time()-start_time)
-
-@bot.message_handler(commands=['language'], func=lambda msg: msg.chat.type == 'private')
-def bot_lang(msg):
-    start_time = time.time()
-    bot.send_message(
-        msg.chat.id,    
-        text.user_messages['start'],
-        reply_markup=create_user_language_keyboard()
-    )
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['ping'])
@@ -454,8 +536,10 @@ def bot_ping(msg):
 
 @bot.message_handler(content_types=['new_chat_members'])
 def bot_users_new(msg):
-    api.register_new_chat(msg.chat)
     start_time = time.time()
+    api.register_new_chat(msg.chat)
+    chat_id = msg.chat.id
+    utils.new_member_logs(msg)
     if api.get_group_params(msg.chat.id)['deletions']['system']:
         bot.delete_message(
             msg.chat.id,
@@ -489,8 +573,7 @@ def bot_users_new(msg):
                 reply_markup = unban_new_user_kb(msg),
                 parse_mode = 'HTML'
             )
-            t = Timer(api.get_group_params(msg.chat.id)['restrictions']['for_time']*3600, utils.delete_msg, (msg.chat.id, r.message_id))
-            t.start()
+            utils.add_to_delete_queue(msg.chat.id, r.message_id, api.get_group_params(msg.chat.id)['restrictions']['for_time']*3600)
         if msg.new_chat_member.is_bot and api.get_group_params(msg.chat.id)['kick_bots']:
             bot.kick_chat_member(
                 msg.chat.id, 
@@ -523,9 +606,7 @@ def bot_users_new(msg):
                     utils.generate_welcome_text(msg), 
                     parse_mode='HTML'
                 )
-                t = Timer(api.get_group_params(msg.chat.id)['greeting']['delete_timer'], utils.delete_msg, (msg.chat.id, r.message_id))
-                t.start()
-    
+                utils.add_to_delete_queue(msg.chat.id, r.message_id, api.get_group_params(msg.chat.id)['greeting']['delete_timer'])
     utils.new_update(msg, time.time()-start_time)
 
 
@@ -589,17 +670,20 @@ def bot_report(msg):
     )
     utils.new_update(msg, time.time()-start_time)
 
-@bot.message_handler(commands = ['unban'], func = lambda msg: msg.chat.type != 'private')
+@bot.message_handler(commands = ['unban'], func = lambda msg: msg.chat.type == 'supergroup')
 def bot_user_unban(msg):
     start_time = time.time()
     if utils.check_status(msg.from_user.id, msg.chat.id) and utils.have_args(msg):
         words = utils.parse_arg(msg)[1]
         user_id = int(words)
         utils.unban_user(msg, user_id)
+    elif utils.check_status(msg.from_user.id, msg.chat.id) and msg.reply_to_message is not None:
+        user_id = msg.reply_to_message.from_user.id
+        utils.unban_user(msg, user_id)
     elif utils.check_status(msg.from_user.id, msg.chat.id) and not utils.have_args(msg):
-        utils.no_args(msg)
+        utils.send_err_report(msg, 'no_args_provided')
     else:
-        utils.not_enought_rights(msg)
+        utils.send_err_report(msg, 'not_enought_rights')
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands = ['reregister'], func = lambda msg: msg.chat.type == 'supergroup')
@@ -620,7 +704,7 @@ def bot_users_ro(msg):
     if utils.check_status(msg.from_user.id, msg.chat.id):
         utils.read_only(msg)
     else:
-        utils.not_enought_rights(msg)
+        utils.send_err_report(msg, 'not_enought_rights')
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['stickerpack_ban'],func=lambda msg: msg.chat.type == 'supergroup')
@@ -629,7 +713,7 @@ def bot_stickerpack_ban(msg):
     if utils.check_status(msg.from_user.id, msg.chat.id):
         utils.ban_stickerpack(msg)
     else:
-        utils.not_enought_rights(msg)
+        utils.send_err_report(msg, 'not_enought_rights')
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['stickerpack_unban'], func=lambda msg: msg.chat.type != 'private')
@@ -648,7 +732,7 @@ def bot_sticker_ban(msg):
         sticker_id = msg.reply_to_message.sticker.file_id
         utils.ban_sticker(msg, sticker_id)
     elif not utils.check_status(msg.from_user.id, msg.chat.id):
-        utils.not_enought_rights(msg)
+        utils.send_err_report(msg, 'not_enought_rights')
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['sticker_unban'], func=lambda msg: msg.chat.type == 'supergroup')
@@ -658,19 +742,19 @@ def bot_sticker_unban(msg):
         sticker_id = utils.parse_arg(msg)[1]
         utils.unban_sticker(msg, sticker_id)
     elif utils.check_status(msg.from_user.id, msg.chat.id) and not utils.have_args(msg):
-        utils.not_enought_rights(msg)
+        utils.send_err_report(msg, 'not_enought_rights')
     elif utils.have_args(msg) and not check_status(msg.from_user.id):
-        utils.no_args(msg)
+        utils.send_err_report(msg, 'no_args_provided')
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['help'])
 def bot_help(msg):
     start_time = time.time()
-    r = bot.send_message(
+    bot.send_message(
         msg.from_user.id,
         text.user_messages[utils.get_user_lang(msg)]['help'],
         parse_mode='HTML'
-        )
+    )
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['about'], func=lambda msg: msg.chat.type == 'private')
@@ -679,16 +763,19 @@ def bot_about(msg):
     bot.send_message(
         msg.chat.id,
         text.user_messages[utils.get_user_lang(msg)]['about'],
-        parse_mode='Markdown')
+        parse_mode='HTML'
+    )
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['warn'], func=lambda msg: msg.chat.type != 'private')
 def bot_new_warn(msg):
     start_time = time.time()
-    if utils.check_status(msg.from_user.id, msg.chat.id):
+    if utils.check_status(msg.from_user.id, msg.chat.id) and msg.reply_to_message is not None and not utils.check_status(msg.reply_to_message.from_user.id, msg.chat.id):
         utils.new_warn(msg)
-    else:
-        utils.not_enought_rights(msg)
+    elif not utils.check_status(msg.from_user.id, msg.chat.id):
+        utils.send_err_report(msg, 'not_enought_rights')
+    elif utils.check_status(msg.reply_to_message.from_user.id, msg.chat.id):
+        utils.send_err_report(msg, 'user_is_admin')
     utils.new_update(msg, time.time()-start_time)
 
 @bot.message_handler(commands=['donate'])
@@ -1223,7 +1310,7 @@ def del_warns(c):
         api.zeroing_warns(user_id, chat_id)
         bot.edit_message_text(
             text = 'Предупреждения обнулены.',
-            chat_id = chat_id,
+            chat_id = c.message.chat.id,
             message_id = c.message.message_id
         )
     else:
@@ -1374,8 +1461,8 @@ def unban_new_user(c):
                 chat_id = c.message.chat.id,
                 message_id = c.message.message_id
             )
-            t = Timer(api.get_group_params(chat_id)['greeting']['delete_timer'], utils.delete_msg, (chat_id, c.message.message_id))
-            t.start()
+            utils.add_to_delete_queue(msg.chat.id, r.message_id, api.get_group_params(msg.chat.id)['greeting']['delete_timer'])
+
         else:
             bot.answer_callback_query(
                 callback_query_id = c.id,
@@ -1406,8 +1493,7 @@ def unban_new_user(c):
                     chat_id = c.message.chat.id,
                     message_id = c.message.message_id
                 )
-                t = Timer(api.get_group_params(chat_id)['greeting']['delete_timer'], utils.delete_msg, (chat_id, c.message.message_id))
-                t.start()
+                utils.add_to_delete_queue(chat_id, c.message.message_id, api.get_group_params(chat_id)['greeting']['delete_timer'])
         else:
             bot.answer_callback_query(
                 callback_query_id = c.id,

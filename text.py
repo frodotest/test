@@ -2,7 +2,7 @@
 
 import random
 
-VERSION = '1.5'
+VERSION = '1.6'
 
 user_messages = {
     'start': '👋',
@@ -22,8 +22,7 @@ user_messages = {
                 '/ping - Проверяет доступность бота. Работает везде и доступна для всех. Если бот не ответил на нее в течение первых 5 секунд - либо конкретно сейчас обрабатывается множество других сообщений, либо что-то случилось с сервером\n'
                 '<a href="http://telegra.ph/Manual-po-ispolzovaniyu-bota-02-03">Мануал по использованию бота</a>',
             
-        'about': 'Бот написан с нуля [Forden](tg://user?id=303986717) и поддерживается в одиночку \n'
-                 'Отдельная благодарность каналу @Obzorchik за информационное сотрудничество и поддержку',
+        'about': 'Бот написан <a href="tg://user?id=303986717">F0rden</a>\n',
 
         'commands': {
             'sticker_ban': 'Стикер <b>{sticker_id}</b> заблокирован. Для разблокировки введите команду <code>/unban {sticker_id}</code>',
@@ -71,10 +70,9 @@ user_messages = {
                 '/ban - Ban user forever in group\n'
                 '/ro - Restrict user from writing in group and for some time. \nSupports next args: seconds (s), minutes (s), hours (h) and even days (d). If no args are provided, user will be restricted for 1 minute\n'
                 '/ping - Check the availability of the bot\n',
-                'about':
-                'Bot created by [Forden](tg://user?id=303986717) and supported alone.\n'
-                'Thanks to @Obzorchick for info support\n'
-                'P.S. If you found any mistakes, please, contact [Forden](tg://user?id=303986717)',
+                'about': 'Bot created by <a href="tg://user?id=303986717">F0rden</a>\n'
+                         'P.S. If you found any mistakes, please, contact <a href="tg://user?id=303986717">F0rden</a>',
+                
 		'commands': {
 			'version': 'Bot version: <b>{version}</b>'
 		}
@@ -95,8 +93,7 @@ user_messages = {
                 '/ping - Перевіряє доступність бота. Працює скрізь і доступна для всіх. Якщо бот не відповів на неї протягом перших 5 секунд, то саме зараз обробляється безліч інших повідомлень, або щось трапилося з сервером\n'
                     '<a href="http://telegra.ph/Manual-po-ispolzovaniyu-bota-02-03">Мануал по використанню бота</a>',
             
-        'about': 'Бот написаний з нуля [Forden](tg://user?id=303986717) і підтримується лише ним\n'
-                 'Окрема подяка каналу @Obzorchik за інформаційну співпрацю і підтримку',
+        'about': 'Бот написаний <a href="tg://user?id=303986717">F0rden</a>\n',
 
         'commands': {
             'sticker_ban': 'Стікер <b>{sticker_id}</b> заблокован. Для розблокування введіть команду <code>/unban {sticker_id}</code>',
@@ -138,8 +135,7 @@ user_messages = {
                 '/ro - Biron bir foydalanuvchini bir qancha vaqt yoza olmaydigan qilib qo‘yadi.\n    Mavjud vaqt o‘lchamlari: sekund(s), minut(m), soat(h), kun(d). Agarda ushbu buyuruq aniq vaqtsiz jo‘natilsa,avtomatik tarzda 1 daqiqaga o‘qiy olmaydigan qilib qo‘yadi.\n'
                 '/ping -Botning ish faoliyatini tekshiradi. Agarda bot 5 sekund ichida javob bermasa, ayni payitda juda ko‘p habarlar qayta ishlanyabdi,yoki server bilan bog‘liq muammo.',
 
-        'about': 'Bot 0 dan [Forden](tg://user?id=303986717) tomonidan yaratilgan va yolg‘iz qo‘llab-quvvatlanadi.\n'
-                 '@Obzorchik kanaliga hamkorlik va yordam uchun alohida minnatdorchilik bildiraman.',
+        'about': 'Bot dan <a href="tg://user?id=303986717">F0rden</a>',
 
         'commands': {
             'sticker_ban':'Stiker <b>{0}</b> qora ro‘yxatga qo‘shildi. \nOlib tashlash uchun <code>/sticker_unban {0}</code> ni jo‘nating.',
@@ -156,10 +152,9 @@ group_commands = {
         'registration': 'Отлично! Я ваш новый админ и помогу в управлении чатом! \n'
                         'Чтобы получить справку - используйте команду /help (сначала нужно активировать бота, отправив ему в личные сообщения команду /start)\n'
                         'Пожалуйста, все администраторы группы, активируйте бота. Это необходимо для корректной работы всех функций',
-        'ban_me_please': 'Ну, <a href="tg://user?id={user_id}">{user_name}</a>, ты сам этого захотел. Ты выиграл {t} мин. рид-онли. Поздравляем✨✨\n'
-                         'Для разблокировки попроси любого администратора написать команду <code>/unban {user_id}</code>',
+        'ban_me_please': 'Твой выигрыш: {t} мин. рид-онли. Поздравляем✨✨\n',
         'errors':{
-            'prefix': 'Извините, но я не могу вам помочь в этом. Причина описана ниже: \n<b>{reason}</b>',
+            'prefix': 'Извините, но я не могу вам помочь в этом: \n<b>{reason}</b>',
             'reasons':{
                 'not_enough_rights': 'у вас недостаточно прав для совершения этого действия.',
                 'no_such_sticker': 'данный стикер еще не был заблокирован.',
@@ -193,6 +188,33 @@ group_commands = {
                              'Блокировка будет действовать до: {until_date}.',
                 'button_pressed': 'Нажата кнопка, <a href="tg://user?id={user_id}">{user_name}</a> разблокирован.'
             }
+        },
+        
+        'log_channel': {
+            'confirmation': {
+                'channel': 'Теперь сюда будут присылаться логи работы бота',
+                'chat': 'Канала с логами установлен',
+                'errors': {
+                    'user_is_not_creator': 'Вы не являетесь создателем канала, у вас недостаточно прав.',
+                    'bot_is_not_admin': 'Бот не является администратором канала и не может публиковать записи'
+                }
+            },
+            'deletion': {
+                'channel': 'Канал отключен',
+                'chat': 'Канал с логами удален',
+            },
+            'new_chat_user': 'Новый пользователь <a href="tg://user?id={new_user_id}">{new_user_firstname}</a> в чате <b>{chat_name}</b>\n'
+                             'ID: <code>{new_user_id}</code>\n'
+                             'Имя: <b>{new_user_firstname}</b>\n'
+                             'Фамилия: <b>{new_user_lastname}</b>\n'
+                             'Юзернейм: @{new_user_username}\n\n'
+                             'Время вступления: <b>{curr_date}</b>',
+            'info': {
+                'is_on': 'Канал подключен\n'
+                         'ID канала: <code>{chat_id}</code>\n'
+                         'Название канала: <b>{chat_name}</b>',
+                'is_off': 'Канал не подключен'
+            },
         },
 
         'users': {
@@ -247,8 +269,7 @@ group_commands = {
     },
     'en': {},
     'ukr': {
-        'ban_me_please': 'Ну, <a href="tg://user?id={user_id}">{user_name}</a>, ти сам цього захотів. Ти виграв {t} мін. рід-онлі. Вітаємо✨✨\n'
-                         'Для розблокування попроси будь-якого адміністратора написати команду<code>/unban {user_id}</code>',
+        'ban_me_please': 'Твій виграш {t} мін. рід-онлі. Вітаємо✨✨',
         'errors':{
             'prefix': 'Вибач, але я не можу вам допомогти в цьому. Причина описана нижче: \n<b>{reason}</b>',
             'reasons': {

@@ -1,15 +1,17 @@
 #coding: utf8
 
+import datetime
 import hashlib
 import logging
 import time
-import cache_worker
+from threading import Thread
+
 import pymysql
 import pymysql.cursors
 import requests
 import telebot
-from threading import Thread
 
+import cache_worker
 import config
 import secret_config
 import text
@@ -205,7 +207,7 @@ def register_new_user(user_obj, lang):
             sec_name = 'None'
             logging.error(e)
         if res is None:
-            sql = 'INSERT INTO `users` (`user_id`, `registration_time`, `first_name`, `second_name`, `settings`) VALUES (%s, %s, %s, %s, %s, %s)'
+            sql = 'INSERT INTO `users` (`user_id`, `registration_time`, `first_name`, `second_name`, `settings`) VALUES (%s, %s, %s, %s, %s)'
             settings = config.default_user_settings
             settings['language'] = lang
             curs.execute(sql, (user_obj.id, int(time.time()), user_obj.first_name, sec_name, ujson.dumps(settings)))
@@ -326,9 +328,10 @@ def get_user_param(user_id, column):
         try:
             return res[column]
         except Exception as e:
+            res = {}
             register_new_user(bot.get_chat_member(-1001236256304, user_id).user, 'ru')
             change_user_param(user_id, 'settings', ujson.dumps(config.default_user_settings))
-            res['settings'] = ujson.dumps(default_user_settings)
+            res['settings'] = ujson.dumps(config.default_user_settings)
             return res[column]
             
 
@@ -730,3 +733,49 @@ def get_top_inviters(chat_id, limit):
         sql = 'SELECT COUNT(`inviter`), `inviter` FROM `inviters` WHERE `chat_id` = %s ORDER BY COUNT(`inviter`) ASC LIMIT %s'
         cursor.execute(sql, (chat_id, limit))
         return cursor.fetchall()
+
+def add_to_delete_queue(chat_id, message_id, deleted_at):
+    with DataConn(db) as conn:
+        cursor = conn.cursor()
+        sql = 'INSERT INTO `will_be_deleted` (`chat_id`, `message_id`, `ttl`) VALUES (%s, %s, %s)'
+        cursor.execute(sql, (chat_id, message_id, deleted_at))
+        conn.commit()
+
+def get_expired_messages():
+    with DataConn(db) as conn:
+        cursor = conn.cursor()
+        sql = 'SELECT * FROM `will_be_deleted` WHERE `ttl` < %s ORDER BY `ttl` ASC'
+        cursor.execute(sql, (int(datetime.datetime.now().timestamp()), ))
+        msg_list = cursor.fetchall()
+        sql = 'DELETE FROM `will_be_deleted` WHERE `ttl` < %s ORDER BY `ttl` ASC'
+        cursor.execute(sql, (int(datetime.datetime.now().timestamp()), ))
+        conn.commit()
+        return msg_list
+
+def add_log_channel(chat_id, channel_id):
+    settings = get_group_params(chat_id)
+    settings['logs_channel']['is_on'] = True
+    settings['logs_channel']['chat_id'] = channel_id
+    change_group_params(chat_id, ujson.dumps(settings))
+    try:
+        with DataConn(db) as conn:
+            cursor = conn.cursor()
+            sql = 'INSERT INTO `log_channels` (`chat_id`, `channel_id`) VALUES (%s, %s)'
+            cursor.execute(sql, (chat_id, channel_id))
+            conn.commit()
+    except Exception as e:
+        print(e)
+
+def remove_log_channel(chat_id):
+    settings = get_group_params(chat_id)
+    settings['logs_channel']['is_on'] = False
+    settings['logs_channel']['chat_id'] = 0
+    change_group_params(chat_id, ujson.dumps(settings))
+    try:
+        with DataConn(db) as conn:
+            cursor = conn.cursor()
+            sql = 'DELETE FROM `log_channels` WHERE `chat_id` = %s'
+            cursor.execute(sql, (chat_id, ))
+            conn.commit()
+    except Exception as e:
+        print(e)
